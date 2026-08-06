@@ -1,5 +1,6 @@
 from models.base import LCModel
 from models.stock import Stock
+from models.enums import Recommendation
 
 
 class ResearchReport(LCModel):
@@ -7,5 +8,5 @@ class ResearchReport(LCModel):
     summary: str
     strengths: list[str]
     risks: list[str]
-    recommendation: str
+    recommendation: Recommendation
     confidence: float

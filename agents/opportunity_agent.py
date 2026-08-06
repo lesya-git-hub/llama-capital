@@ -1,7 +1,7 @@
 from models.opportunity import Opportunity
 from models.research_report import ResearchReport
 from tools.scoring import calculate_opportunity_score
-
+from models.enums import Recommendation
 
 class OpportunityAgent:
     def evaluate(self, opportunity: Opportunity) -> ResearchReport:
@@ -26,6 +26,6 @@ class OpportunityAgent:
                 "Financial impact has not yet been verified",
                 "Market reaction has not yet been measured",
             ],
-            recommendation="RESEARCH",
+            recommendation=Recommendation.RESEARCH,
             confidence=score,
         )
