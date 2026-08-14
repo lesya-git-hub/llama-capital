@@ -9,9 +9,32 @@ class CommitteeAgent:
         self,
         screening: ScreeningResult,
         research: ResearchReport,
+        qa_passed: bool,
+        iqa_passed: bool,
     ) -> CommitteeDecision:
 
         rationale = []
+        if not qa_passed:
+            rationale.append("QA rejected the research report.")
+
+            return CommitteeDecision(
+                stock=research.stock,
+                decision=CommitteeDecisionType.REJECT,
+                allocation_percent=0.0,
+                confidence=0.0,
+                rationale=rationale,
+        )
+
+        if not iqa_passed:
+            rationale.append("iQA rejected the research report.")
+
+            return CommitteeDecision(
+                stock=research.stock,
+                decision=CommitteeDecisionType.REJECT,
+                allocation_percent=0.0,
+                confidence=0.0,
+                rationale=rationale,
+            )
 
         if screening.passed:
             rationale.append("Universe Screener approved the company.")

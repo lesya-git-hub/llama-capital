@@ -39,13 +39,17 @@ for reason in screening_result.reasons:
 
 pipeline = OpportunityPipeline()
 
-report, passed, issues = pipeline.run(opportunity)
+report, qa_passed, qa_issues, iqa_passed, iqa_issues = pipeline.run(
+    opportunity
+)
 
 print()
 print("Pipeline Result")
-print("Passed:", passed)
+print("QA Passed:", qa_passed)
+print("iQA Passed:", iqa_passed)
+
 print("Ticker:", report.stock.ticker)
-print("Recommendation:", report.recommendation)
+print("Recommendation:", report.recommendation.value)
 print("Confidence:", report.confidence)
 print("Summary:", report.summary)
 
@@ -57,20 +61,23 @@ print("Risks:")
 for risk in report.risks:
     print("-", risk)
 
-for issue in issues:
+for issue in qa_issues:
     print("QA issue:", issue)
 
-
+for issue in iqa_issues:
+    print("iQA issue:", issue)
 committee = CommitteeAgent()
 
 decision = committee.decide(
     screening=screening_result,
     research=report,
+    qa_passed=qa_passed,
+    iqa_passed=iqa_passed,
 )
 
 print()
 print("Committee Decision")
-print("Decision:", decision.decision)
+print("Decision:", decision.decision.value)
 print("Allocation:", f"{decision.allocation_percent}%")
 print("Confidence:", decision.confidence)
 
