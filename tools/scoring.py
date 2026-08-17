@@ -8,7 +8,7 @@ def calculate_opportunity_score(opportunity: Opportunity) -> float:
     score += opportunity.importance * 10
 
     # Reuters gets a credibility bonus
-    if opportunity.source.lower() == "reuters":
-        score += 10
+    if opportunity.evidence.source.lower() == "reuters":
+      score += 10
 
     return min(score, 100)

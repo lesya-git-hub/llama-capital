@@ -20,7 +20,7 @@ class OpportunityAgent:
             ),
             strengths=[
                 "Meaningful corporate event detected",
-                f"Source provided: {opportunity.source}",
+                f"Source provided: {opportunity.evidence.source}",
             ],
             risks=[
                 "Financial impact has not yet been verified",

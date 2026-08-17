@@ -3,6 +3,7 @@ from models.stock import Stock
 from workflows.opportunity_pipeline import OpportunityPipeline
 from agents.committee_agent import CommitteeAgent
 from workflows.universe_pipeline import UniversePipeline
+from providers.mock_evidence_provider import MockEvidenceProvider
 
 stock = Stock(
     ticker="RKLB",
@@ -11,12 +12,16 @@ stock = Stock(
     industry="Aerospace",
     exchange="NASDAQ",
 )
+evidence_provider = MockEvidenceProvider()
+evidence_list = evidence_provider.fetch(stock)
+
+evidence = evidence_list[0]
 
 opportunity = Opportunity(
     stock=stock,
-    event="Won new government contract",
+    evidence=evidence,
+    event=evidence.headline,
     importance=8,
-    source="Reuters",
 )
 
 universe_pipeline = UniversePipeline()

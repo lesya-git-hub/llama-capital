@@ -1,5 +1,6 @@
 from models.base import LCModel
 from models.stock import Stock
+from models.evidence import Evidence
 
 
 class Opportunity(LCModel):
@@ -9,4 +10,4 @@ class Opportunity(LCModel):
 
     importance: int
 
-    source: str
+    evidence: Evidence
