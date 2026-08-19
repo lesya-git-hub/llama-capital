@@ -1,8 +1,8 @@
 from models.evidence import Evidence
 from models.stock import Stock
+from providers.base_evidence_provider import BaseEvidenceProvider
 
-
-class MockEvidenceProvider:
+class MockEvidenceProvider(BaseEvidenceProvider):
     def fetch(self, stock: Stock) -> list[Evidence]:
         return [
             Evidence(
