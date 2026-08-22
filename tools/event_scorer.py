@@ -106,6 +106,8 @@ def analyze_event(
     analyst = EventAnalyst()
 
     llm_analysis = analyst.analyze(cluster)
+    article_kind = llm_analysis.article_kind
+    is_primary_event = llm_analysis.is_primary_event
 
     event_type = llm_analysis.event_type
     impact_direction = llm_analysis.impact_direction
@@ -140,6 +142,8 @@ def analyze_event(
     return EventAnalysis(
         cluster=cluster,
         event_type=event_type,
+        article_kind=article_kind,
+        is_primary_event=is_primary_event,
         importance_score=importance,
         source_quality_score=source_quality,
         corroboration_score=corroboration,

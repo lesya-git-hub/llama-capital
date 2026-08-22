@@ -3,7 +3,9 @@ from models.stock import Stock
 from workflows.opportunity_pipeline import OpportunityPipeline
 from agents.committee_agent import CommitteeAgent
 from workflows.universe_pipeline import UniversePipeline
-from providers.mock_evidence_provider import MockEvidenceProvider
+from workflows.intelligence_pipeline import IntelligencePipeline
+from tools.event_eligibility import select_top_eligible_event
+
 
 stock = Stock(
     ticker="RKLB",
@@ -12,16 +14,48 @@ stock = Stock(
     industry="Aerospace",
     exchange="NASDAQ",
 )
-evidence_provider = MockEvidenceProvider()
-evidence_list = evidence_provider.fetch(stock)
+intelligence_pipeline = IntelligencePipeline()
 
-evidence = evidence_list[0]
+ranked_opportunities = intelligence_pipeline.run(
+    stock,
+    max_evidence=10,
+)
+
+print()
+print("=" * 100)
+print("LIVE INTELLIGENCE")
+print("=" * 100)
+
+top_analysis = select_top_eligible_event(
+    ranked_opportunities,
+)
+
+if top_analysis is None:
+    raise RuntimeError(
+        "No eligible live event found for research."
+    )
+
+top_evidence = top_analysis.cluster.evidence_items[0]
+
+for rank, analysis in enumerate(
+    ranked_opportunities,
+    start=1,
+):
+    print()
+    print(f"#{rank}")
+    print("Event:", analysis.cluster.title)
+    print("Type:", analysis.event_type.value)
+    print("Article kind:", analysis.article_kind.value)
+    print("Primary event:", analysis.is_primary_event)
+    print("Impact:", analysis.impact_direction.value)
+    print("Impact score:", analysis.impact_score)
+    print("Opportunity score:", analysis.opportunity_score)
 
 opportunity = Opportunity(
     stock=stock,
-    evidence=evidence,
-    event=evidence.headline,
-    importance=8,
+    evidence=top_evidence,
+    event=top_analysis.cluster.title,
+    importance=round(top_analysis.importance_score),
 )
 
 universe_pipeline = UniversePipeline()

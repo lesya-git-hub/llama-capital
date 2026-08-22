@@ -9,7 +9,11 @@ from tools.event_scorer import (
     calculate_corroboration,
     calculate_source_quality,
 )
-
+from models.event_analysis import (
+    ArticleKind,
+    EventType,
+    ImpactDirection,
+)
 
 def make_cluster(
     headline: str,
@@ -65,6 +69,8 @@ class FakeEventAnalyst:
             bear_case=["Test bear case."],
             uncertainties=["Test uncertainty."],
             rationale="Test analysis.",
+            article_kind=ArticleKind.CORPORATE_EVENT,
+            is_primary_event=True,
         )
 
 

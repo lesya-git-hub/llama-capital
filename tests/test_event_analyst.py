@@ -4,6 +4,11 @@ from models.event_analysis import EventType, ImpactDirection
 from models.event_analyst_output import EventAnalystOutput
 from models.event_cluster import EventCluster
 from models.stock import Stock
+from models.event_analysis import (
+    ArticleKind,
+    EventType,
+    ImpactDirection,
+)
 
 
 def make_cluster(
@@ -47,6 +52,8 @@ class SuccessfulProvider:
             bear_case=["Contract size may be limited."],
             uncertainties=["Revenue timing is unknown."],
             rationale="Positive contract event.",
+            article_kind=ArticleKind.CORPORATE_EVENT,
+            is_primary_event=True,
         )
 
 

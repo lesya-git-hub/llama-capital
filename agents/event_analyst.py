@@ -1,4 +1,5 @@
 from models.event_analysis import (
+    ArticleKind,
     EventType,
     ImpactDirection,
 )
@@ -38,6 +39,8 @@ class EventAnalyst:
 
         return EventAnalystOutput(
             event_type=event_type,
+            article_kind=ArticleKind.CORPORATE_EVENT,
+            is_primary_event=True,
             impact_direction=impact_direction,
             impact_score=impact_score,
             materiality_score=5.0,
