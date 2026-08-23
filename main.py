@@ -56,6 +56,20 @@ opportunity = Opportunity(
     evidence=top_evidence,
     event=top_analysis.cluster.title,
     importance=round(top_analysis.importance_score),
+
+    opportunity_score=top_analysis.opportunity_score,
+
+    impact_direction=top_analysis.impact_direction,
+    impact_score=top_analysis.impact_score,
+
+    materiality_score=top_analysis.importance_score,
+
+    source_quality_score=top_analysis.source_quality_score,
+    corroboration_score=top_analysis.corroboration_score,
+    strategic_relevance_score=top_analysis.strategic_relevance_score,
+
+    article_kind=top_analysis.article_kind,
+    is_primary_event=top_analysis.is_primary_event,
 )
 
 universe_pipeline = UniversePipeline()

@@ -9,8 +9,11 @@ class OpportunityAgent:
 
         print(f"Evaluating: {opportunity.stock.ticker}")
         print(f"Event: {opportunity.event}")
-        print(f"Importance: {opportunity.importance}")
-        print(f"Score: {score}")
+        print(f"Materiality: {opportunity.materiality_score}")
+        print(f"Source quality: {opportunity.source_quality_score}")
+        print(f"Corroboration: {opportunity.corroboration_score}")
+        print(f"Strategic relevance: {opportunity.strategic_relevance_score}")
+        print(f"Research confidence: {score}")
 
         return ResearchReport(
             stock=opportunity.stock,

@@ -108,3 +108,17 @@ def test_commentary_is_not_eligible() -> None:
     )
 
     assert is_event_eligible(analysis) is False
+
+def test_valuation_headline_is_vetoed_even_if_llm_calls_it_primary() -> None:
+    analysis = make_analysis(
+        EventType.CONTRACT,
+        90.0,
+        article_kind=ArticleKind.CORPORATE_EVENT,
+        is_primary_event=True,
+    )
+
+    analysis.cluster.title = (
+        "Rocket Lab may be 38% undervalued after contract wins"
+    )
+
+    assert is_event_eligible(analysis) is False

@@ -1,14 +1,26 @@
 from models.opportunity import Opportunity
 
 
-def calculate_opportunity_score(opportunity: Opportunity) -> float:
-    score = 0.0
+def calculate_opportunity_score(
+    opportunity: Opportunity,
+) -> float:
+    """
+    Calculate research confidence from evidence quality
+    and event significance.
 
-    # Event importance contributes directly
-    score += opportunity.importance * 10
+    Impact direction is intentionally excluded:
+    negative events can still be highly important
+    research opportunities.
+    """
 
-    # Reuters gets a credibility bonus
-    if opportunity.evidence.source.lower() == "reuters":
-      score += 10
+    score = (
+        opportunity.materiality_score * 3.0
+        + opportunity.source_quality_score * 2.0
+        + opportunity.corroboration_score * 2.0
+        + opportunity.strategic_relevance_score * 3.0
+    )
 
-    return min(score, 100)
+    return round(
+        max(0.0, min(score, 100.0)),
+        1,
+    )

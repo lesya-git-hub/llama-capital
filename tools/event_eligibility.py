@@ -7,12 +7,24 @@ ELIGIBLE_EVENT_TYPES = {
     EventType.ACQUISITION,
     EventType.PRODUCT,
 }
-
+VALUATION_COMMENTARY_TERMS = (
+    "undervalued",
+    "overvalued",
+    "fair value",
+    "fairly valued",
+    "intrinsic value",
+    "times revenue",
+    "times earnings",
+    "valuation",
+)
 
 def is_event_eligible(
     analysis: EventAnalysis,
     minimum_opportunity_score: float = 50.0,
 ) -> bool:
+    if has_commentary_veto(analysis):
+        return False
+
     if not analysis.is_primary_event:
         return False
 
@@ -37,4 +49,13 @@ def select_top_eligible_event(
             return analysis
 
     return None
-    
+
+def has_commentary_veto(
+    analysis: EventAnalysis,
+) -> bool:
+    text = analysis.cluster.title.lower()
+
+    return any(
+        term in text
+        for term in VALUATION_COMMENTARY_TERMS
+    )
