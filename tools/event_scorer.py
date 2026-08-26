@@ -1,67 +1,106 @@
 from models.event_analysis import EventAnalysis, EventType
 from models.event_cluster import EventCluster
-from tools.event_classifier import classify_event
 from agents.event_analyst import EventAnalyst
+from models.source_quality import SourceType
+from tools.source_quality import (
+    get_source_quality,
+    get_source_type,
+)
 
-
-SOURCE_QUALITY = {
-    "Reuters": 10.0,
-    "Bloomberg": 10.0,
-    "Associated Press": 9.5,
-    "Yahoo": 7.0,
-    "Benzinga": 6.5,
-    "SeekingAlpha": 5.5,
-}
-
-
-EVENT_IMPORTANCE = {
-    EventType.CONTRACT: 8.0,
-    EventType.EARNINGS: 8.0,
-    EventType.GUIDANCE: 9.0,
-    EventType.ACQUISITION: 9.0,
-    EventType.PRODUCT: 7.5,
-    EventType.REGULATORY: 8.5,
-    EventType.PARTNERSHIP: 7.0,
-    EventType.ANALYST_RATING: 5.5,
-    EventType.FINANCING: 7.0,
-    EventType.MANAGEMENT: 6.0,
-    EventType.OTHER: 4.0,
-}
-
-
-def calculate_source_quality(cluster: EventCluster) -> float:
+def calculate_source_quality(
+    cluster: EventCluster,
+) -> float:
     scores = [
-        SOURCE_QUALITY.get(item.source, 5.0)
+        get_source_quality(item.source)
         for item in cluster.evidence_items
     ]
 
     if not scores:
         return 0.0
 
-    return sum(scores) / len(scores)
+    return round(
+        sum(scores) / len(scores),
+        1,
+    )
 
 
-def calculate_corroboration(cluster: EventCluster) -> float:
+def calculate_corroboration(
+    cluster: EventCluster,
+) -> float:
+    if not cluster.evidence_items:
+        return 0.0
+
+    source_types = {
+        get_source_type(item.source)
+        for item in cluster.evidence_items
+    }
+
     unique_sources = {
         item.source
         for item in cluster.evidence_items
     }
 
-    source_count = len(unique_sources)
+    has_official = (
+        SourceType.OFFICIAL in source_types
+    )
 
-    if source_count >= 4:
+    has_primary_news = (
+        SourceType.PRIMARY_NEWS in source_types
+    )
+
+    has_secondary_news = (
+        SourceType.SECONDARY_NEWS in source_types
+    )
+
+    independent_source_count = len(unique_sources)
+
+    if has_official and has_primary_news:
         return 10.0
 
-    if source_count == 3:
-        return 8.0
+    if (
+        has_official
+        and independent_source_count >= 2
+    ):
+        return 9.0
 
-    if source_count == 2:
+    if (
+        has_primary_news
+        and independent_source_count >= 3
+    ):
+        return 8.5
+
+    if (
+        has_primary_news
+        and independent_source_count >= 2
+    ):
+        return 7.5
+
+    if (
+        has_secondary_news
+        and independent_source_count >= 3
+    ):
         return 6.0
 
-    if source_count == 1:
+    if independent_source_count >= 2:
+        return 5.0
+
+    source_type = get_source_type(
+        cluster.evidence_items[0].source
+    )
+
+    if source_type == SourceType.OFFICIAL:
+        return 7.0
+
+    if source_type == SourceType.PRIMARY_NEWS:
+        return 6.0
+
+    if source_type == SourceType.SECONDARY_NEWS:
         return 3.0
 
-    return 0.0
+    if source_type == SourceType.COMMENTARY:
+        return 1.5
+
+    return 2.0
 
 
 def calculate_strategic_relevance(

@@ -1,3 +1,4 @@
+import sys
 from models.opportunity import Opportunity
 from models.stock import Stock
 from workflows.opportunity_pipeline import OpportunityPipeline
@@ -5,6 +6,8 @@ from agents.committee_agent import CommitteeAgent
 from workflows.universe_pipeline import UniversePipeline
 from workflows.intelligence_pipeline import IntelligencePipeline
 from tools.event_eligibility import select_top_eligible_event
+from providers.sec_evidence_provider import SECEvidenceProvider
+from tools.evidence_matcher import EvidenceMatcher
 
 
 stock = Stock(
@@ -14,7 +17,12 @@ stock = Stock(
     industry="Aerospace",
     exchange="NASDAQ",
 )
-intelligence_pipeline = IntelligencePipeline()
+intelligence_pipeline = IntelligencePipeline(
+    corroboration_provider=SECEvidenceProvider(),
+    evidence_matcher=EvidenceMatcher(
+        threshold=0.65,
+    ),
+)
 
 ranked_opportunities = intelligence_pipeline.run(
     stock,
@@ -25,17 +33,6 @@ print()
 print("=" * 100)
 print("LIVE INTELLIGENCE")
 print("=" * 100)
-
-top_analysis = select_top_eligible_event(
-    ranked_opportunities,
-)
-
-if top_analysis is None:
-    raise RuntimeError(
-        "No eligible live event found for research."
-    )
-
-top_evidence = top_analysis.cluster.evidence_items[0]
 
 for rank, analysis in enumerate(
     ranked_opportunities,
@@ -50,6 +47,40 @@ for rank, analysis in enumerate(
     print("Impact:", analysis.impact_direction.value)
     print("Impact score:", analysis.impact_score)
     print("Opportunity score:", analysis.opportunity_score)
+    print(
+        "Sources:",
+        [
+            item.source
+            for item in analysis.cluster.evidence_items
+        ],
+    )
+    print(
+        "Corroboration:",
+        analysis.corroboration_score,
+    )
+    print(
+        "Source quality:",
+        analysis.source_quality_score,
+    )
+
+top_analysis = select_top_eligible_event(
+    ranked_opportunities,
+)
+
+if top_analysis is None:
+    print()
+    print("=" * 100)
+    print("RESEARCH GATE")
+    print("=" * 100)
+    print(
+        "No eligible primary corporate event found. "
+        "No research or committee decision will be produced."
+    )
+    print("Decision: NO ACTION")
+
+    sys.exit(0)
+
+top_evidence = top_analysis.cluster.evidence_items[0]
 
 opportunity = Opportunity(
     stock=stock,
