@@ -8,7 +8,12 @@ from workflows.intelligence_pipeline import IntelligencePipeline
 from tools.event_eligibility import select_top_eligible_event
 from providers.sec_evidence_provider import SECEvidenceProvider
 from tools.evidence_matcher import EvidenceMatcher
-
+from sentence_transformers import SentenceTransformer
+from tools.event_clusterer import SemanticEventClusterer
+from tools.event_eligibility import (
+    get_event_eligibility_reason,
+    select_top_eligible_event,
+)
 
 stock = Stock(
     ticker="RKLB",
@@ -17,11 +22,23 @@ stock = Stock(
     industry="Aerospace",
     exchange="NASDAQ",
 )
+embedding_model = SentenceTransformer(
+    "sentence-transformers/all-MiniLM-L6-v2"
+)
+
+clusterer = SemanticEventClusterer(
+    model=embedding_model,
+    threshold=0.60,
+)
+
+evidence_matcher = EvidenceMatcher(
+    model=embedding_model,
+    threshold=0.65,
+)
 intelligence_pipeline = IntelligencePipeline(
+    clusterer=clusterer,
     corroboration_provider=SECEvidenceProvider(),
-    evidence_matcher=EvidenceMatcher(
-        threshold=0.65,
-    ),
+    evidence_matcher=evidence_matcher,
 )
 
 ranked_opportunities = intelligence_pipeline.run(
@@ -47,6 +64,7 @@ for rank, analysis in enumerate(
     print("Impact:", analysis.impact_direction.value)
     print("Impact score:", analysis.impact_score)
     print("Opportunity score:", analysis.opportunity_score)
+
     print(
         "Sources:",
         [
@@ -54,14 +72,49 @@ for rank, analysis in enumerate(
             for item in analysis.cluster.evidence_items
         ],
     )
+
     print(
         "Corroboration:",
         analysis.corroboration_score,
     )
+
     print(
         "Source quality:",
         analysis.source_quality_score,
     )
+
+    official_evidence = [
+        item
+        for item in analysis.cluster.evidence_items
+        if item.source.upper() == "SEC"
+    ]
+
+    print(
+        "Official corroboration:",
+        "YES" if official_evidence else "NO",
+    )
+
+    for item in official_evidence:
+        print(
+            "Matched official filing:",
+            item.headline,
+        )
+
+    print(
+        "Eligible for research:",
+        "YES" if analysis.eligible_for_research else "NO",
+    )
+
+    print(
+        "Eligibility reason:",
+        analysis.eligibility_reason,
+    )
+
+    for item in official_evidence:
+        print(
+            "Matched official filing:",
+            item.headline,
+        )
 
 top_analysis = select_top_eligible_event(
     ranked_opportunities,

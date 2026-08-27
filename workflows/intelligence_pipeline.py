@@ -3,7 +3,7 @@ from models.stock import Stock
 from providers.finnhub_evidence_provider import FinnhubEvidenceProvider
 from tools.evidence_filter import filter_evidence
 from tools.event_scorer import analyze_event
-
+from tools.event_eligibility import get_event_eligibility_reason
 
 class IntelligencePipeline:
     def __init__(
@@ -93,10 +93,19 @@ class IntelligencePipeline:
                 corroborating_evidence,
             )
 
-        analyses = [
-            analyze_event(cluster)
-            for cluster in clusters
-        ]
+        analyses = []
+
+        for cluster in clusters:
+            analysis = analyze_event(cluster)
+
+            eligible, reason = get_event_eligibility_reason(
+                analysis,
+            )
+
+            analysis.eligible_for_research = eligible
+            analysis.eligibility_reason = reason
+
+            analyses.append(analysis)
 
         return sorted(
             analyses,

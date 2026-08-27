@@ -18,24 +18,41 @@ VALUATION_COMMENTARY_TERMS = (
     "valuation",
 )
 
+def get_event_eligibility_reason(
+    analysis: EventAnalysis,
+    minimum_opportunity_score: float = 50.0,
+) -> tuple[bool, str]:
+    if has_commentary_veto(analysis):
+        return False, "valuation commentary veto"
+
+    if not analysis.is_primary_event:
+        return False, "not a primary corporate event"
+
+    if analysis.event_type not in ELIGIBLE_EVENT_TYPES:
+        return False, "event type is not eligible"
+
+    if analysis.opportunity_score < minimum_opportunity_score:
+        return (
+            False,
+            (
+                "opportunity score below threshold "
+                f"({analysis.opportunity_score:.1f} < "
+                f"{minimum_opportunity_score:.1f})"
+            ),
+        )
+
+    return True, "eligible for research"
+
 def is_event_eligible(
     analysis: EventAnalysis,
     minimum_opportunity_score: float = 50.0,
 ) -> bool:
-    if has_commentary_veto(analysis):
-        return False
+    eligible, _ = get_event_eligibility_reason(
+        analysis,
+        minimum_opportunity_score=minimum_opportunity_score,
+    )
 
-    if not analysis.is_primary_event:
-        return False
-
-    if analysis.event_type not in ELIGIBLE_EVENT_TYPES:
-        return False
-
-    if analysis.opportunity_score < minimum_opportunity_score:
-        return False
-
-    return True
-
+    return eligible
 
 def select_top_eligible_event(
     analyses: list[EventAnalysis],

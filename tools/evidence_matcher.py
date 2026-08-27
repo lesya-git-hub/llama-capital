@@ -6,14 +6,23 @@ from models.evidence import Evidence
 class EvidenceMatcher:
     def __init__(
         self,
+        model=None,
         model_name: str = (
             "sentence-transformers/all-MiniLM-L6-v2"
         ),
         threshold: float = 0.65,
     ) -> None:
-        from sentence_transformers import SentenceTransformer
+        if model is not None:
+            self.model = model
+        else:
+            from sentence_transformers import (
+                SentenceTransformer,
+            )
 
-        self.model = SentenceTransformer(model_name)
+            self.model = SentenceTransformer(
+                model_name
+            )
+
         self.threshold = threshold
 
     @staticmethod

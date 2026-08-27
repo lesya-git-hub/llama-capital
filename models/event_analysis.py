@@ -39,7 +39,8 @@ class EventAnalysis(LCModel):
     event_type: EventType
     article_kind: ArticleKind
     is_primary_event: bool
-
+    eligible_for_research: bool = False
+    eligibility_reason: str = "not evaluated"
     importance_score: float
     source_quality_score: float
     corroboration_score: float

@@ -9,10 +9,17 @@ from models.evidence import Evidence
 class SemanticEventClusterer:
     def __init__(
         self,
+        model=None,
         model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
         threshold: float = 0.60,
     ) -> None:
-        self.model = SentenceTransformer(model_name)
+        if model is not None:
+            self.model = model
+        else:
+            self.model = SentenceTransformer(
+                model_name
+            )
+
         self.threshold = threshold
 
     @staticmethod
@@ -20,21 +27,21 @@ class SemanticEventClusterer:
         text_lower = text.lower()
 
         groups: dict[str, set[str]] = {
-        "contract": set(),
-        "product": set(),
-        "earnings": set(),
-        "acquisition": set(),
-        "analyst": set(),
-        }
+            "contract": set(),
+            "product": set(),
+            "earnings": set(),
+            "acquisition": set(),
+            "analyst": set(),
+            }
 
         contract_terms = {
-        "space force",
-        "nite-star",
-        "sdn-b",
-        "contract",
-        "awarded",
-        "delivery orders",
-        }
+            "space force",
+            "nite-star",
+            "sdn-b",
+            "contract",
+            "awarded",
+            "delivery orders",
+            }
 
         product_terms = {
         "neutron",
