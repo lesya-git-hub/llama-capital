@@ -1,6 +1,6 @@
 from agents.universe_screener import UniverseScreener
+from models.market_snapshot import MarketSnapshot
 from models.screening_result import ScreeningResult
-from models.stock import Stock
 
 
 class UniversePipeline:
@@ -9,17 +9,12 @@ class UniversePipeline:
 
     def run(
         self,
-        stock: Stock,
-        *,
-        market_cap_billion: float,
-        revenue_growth_percent: float,
-        debt_to_equity: float,
-        above_200_ema: bool,
+        snapshot: MarketSnapshot,
     ) -> ScreeningResult:
         return self.screener.screen(
-            stock,
-            market_cap_billion=market_cap_billion,
-            revenue_growth_percent=revenue_growth_percent,
-            debt_to_equity=debt_to_equity,
-            above_200_ema=above_200_ema,
+            snapshot.stock,
+            market_cap_billion=snapshot.market_cap_billion,
+            revenue_growth_percent=snapshot.revenue_growth_percent,
+            debt_to_equity=snapshot.debt_to_equity,
+            above_200_ema=snapshot.above_200_ema,
         )

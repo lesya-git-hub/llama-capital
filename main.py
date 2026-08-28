@@ -8,7 +8,9 @@ from tools.event_clusterer import SemanticEventClusterer
 from workflows.intelligence_pipeline import IntelligencePipeline
 from workflows.research_orchestrator import ResearchOrchestrator
 from workflows.universe_pipeline import UniversePipeline
-
+from providers.finnhub_market_data_provider import (
+    FinnhubMarketDataProvider,
+)
 
 stock = Stock(
     ticker="RKLB",
@@ -115,7 +117,64 @@ for rank, analysis in enumerate(
         analysis.eligibility_reason,
     )
 
+market_data_provider = FinnhubMarketDataProvider()
 
+snapshot = market_data_provider.fetch(
+    stock
+)
+
+universe_pipeline = UniversePipeline()
+
+screening_result = universe_pipeline.run(
+    snapshot
+)
+
+print()
+print("=" * 100)
+print("MARKET SNAPSHOT")
+print("=" * 100)
+
+print(
+    "Market cap:",
+    snapshot.market_cap_billion,
+    "B",
+)
+print(
+    "Revenue growth:",
+    snapshot.revenue_growth_percent,
+    "%",
+)
+print(
+    "Debt / equity:",
+    snapshot.debt_to_equity,
+)
+print(
+    "Price:",
+    snapshot.price,
+)
+print(
+    "EMA 200:",
+    snapshot.ema_200,
+)
+print(
+    "Above EMA 200:",
+    snapshot.above_200_ema,
+)
+print(
+    "Source:",
+    snapshot.source,
+)
+
+print()
+print("=" * 100)
+print("UNIVERSE SCREENING")
+print("=" * 100)
+
+print("Passed:", screening_result.passed)
+print("Score:", screening_result.score)
+
+for reason in screening_result.reasons:
+    print("-", reason)
 research_orchestrator = ResearchOrchestrator()
 
 research_result = research_orchestrator.run(
@@ -140,24 +199,6 @@ else:
         raise RuntimeError(
             "Research completed without a research report."
         )
-
-    universe_pipeline = UniversePipeline()
-
-    screening_result = universe_pipeline.run(
-        stock,
-        market_cap_billion=8.5,
-        revenue_growth_percent=22.0,
-        debt_to_equity=0.7,
-        above_200_ema=True,
-    )
-
-    print()
-    print("Universe Screening Result")
-    print("Passed:", screening_result.passed)
-    print("Score:", screening_result.score)
-
-    for reason in screening_result.reasons:
-        print("-", reason)
 
     print()
     print("Pipeline Result")
