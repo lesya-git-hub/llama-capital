@@ -3,7 +3,7 @@ from agents.opportunity_agent import OpportunityAgent
 from agents.qa_agent import QAAgent
 from models.opportunity import Opportunity
 from models.research_report import ResearchReport
-
+from exceptions.opportunity_exceptions import IneligibleOpportunityError
 
 class OpportunityPipeline:
     def __init__(self) -> None:
@@ -20,7 +20,12 @@ class OpportunityPipeline:
         list[str],
         bool,
         list[str],
-    ]:
+    ]:  
+        if not opportunity.eligible_for_research:
+            raise IneligibleOpportunityError(
+                "Ineligible opportunity reached research pipeline: "
+                f"{opportunity.eligibility_reason}"
+            )
         report = self.opportunity_agent.evaluate(opportunity)
 
         qa_passed, qa_issues = self.qa_agent.review(report)

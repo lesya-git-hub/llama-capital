@@ -3,7 +3,6 @@ from models.stock import Stock
 from models.evidence import Evidence
 from models.event_analysis import ArticleKind, ImpactDirection
 
-
 class Opportunity(LCModel):
     stock: Stock
 
@@ -30,3 +29,5 @@ class Opportunity(LCModel):
     article_kind: ArticleKind
 
     is_primary_event: bool
+    eligible_for_research: bool = False
+    eligibility_reason: str = "not evaluated"
