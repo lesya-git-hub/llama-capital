@@ -1,5 +1,7 @@
 import os
+import time
 
+import requests
 import finnhub
 from dotenv import load_dotenv
 
@@ -46,23 +48,76 @@ class FinnhubMarketDataProvider(
             or YahooPriceHistoryProvider()
         )
 
+    def _with_retry(
+        self,
+        operation,
+        *args,
+        **kwargs,
+    ):
+        last_error = None
+
+        for attempt in range(3):
+            try:
+                return operation(
+                    *args,
+                    **kwargs,
+                )
+
+            except (
+                requests.exceptions.Timeout,
+                requests.exceptions.ConnectionError,
+            ) as error:
+                last_error = error
+
+            except Exception as error:
+                message = str(error)
+
+                retryable = any(
+                    code in message
+                    for code in (
+                        "429",
+                        "500",
+                        "502",
+                        "503",
+                        "504",
+                        "timed out",
+                        "Read timed out",
+                    )
+                )
+
+            if not retryable:
+                raise
+
+            last_error = error
+
+        if attempt < 2:
+            time.sleep(2 ** attempt)
+
+        if last_error is not None:
+            raise last_error
+
+        raise RuntimeError(
+            "Finnhub operation failed without an error."
+        )
+    
     def fetch(
         self,
         stock: Stock,
     ) -> MarketSnapshot:
-        profile = self.client.company_profile2(
-            symbol=stock.ticker
+        profile = self._with_retry(
+            self.client.company_profile2,
+            symbol=stock.ticker,
         )
 
-        quote = self.client.quote(
-            stock.ticker
+        quote = self._with_retry(
+            self.client.quote,
+            stock.ticker,
         )
 
-        financials = (
-            self.client.company_basic_financials(
-                stock.ticker,
-                "all",
-            )
+        financials = self._with_retry(
+            self.client.company_basic_financials,
+            stock.ticker,
+            "all",
         )
 
         metrics = financials.get(
