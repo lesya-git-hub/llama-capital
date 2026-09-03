@@ -4,6 +4,9 @@ from providers.finnhub_evidence_provider import FinnhubEvidenceProvider
 from tools.evidence_filter import filter_evidence
 from tools.event_scorer import analyze_event
 from tools.event_eligibility import get_event_eligibility_reason
+from tools.stock_evidence_relevance import (
+    StockEvidenceRelevanceFilter,
+)
 
 class IntelligencePipeline:
     def __init__(
@@ -12,6 +15,7 @@ class IntelligencePipeline:
         clusterer=None,
         corroboration_provider=None,
         evidence_matcher=None,
+        relevance_filter=None,
     ) -> None:
         self.evidence_provider = (
             evidence_provider
@@ -29,7 +33,10 @@ class IntelligencePipeline:
             self.clusterer = SemanticEventClusterer(
                 threshold=0.60,
             )
-
+        self.relevance_filter = (
+            relevance_filter
+            or StockEvidenceRelevanceFilter()
+        )
     def _enrich_clusters(
         self,
         clusters,
@@ -75,9 +82,14 @@ class IntelligencePipeline:
             evidence,
             max_items=max_evidence,
         )
-
+        relevant_evidence = (
+            self.relevance_filter.filter(
+                stock,
+                filtered_evidence,
+            )
+        )
         clusters = self.clusterer.cluster(
-            filtered_evidence,
+            relevant_evidence,
         )
 
         if (

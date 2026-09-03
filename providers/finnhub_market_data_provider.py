@@ -85,13 +85,15 @@ class FinnhubMarketDataProvider(
                     )
                 )
 
-            if not retryable:
-                raise
+                if not retryable:
+                    raise
 
-            last_error = error
+                last_error = error
 
-        if attempt < 2:
-            time.sleep(2 ** attempt)
+            if attempt < 2:
+                time.sleep(
+                    2 ** attempt
+                )
 
         if last_error is not None:
             raise last_error
