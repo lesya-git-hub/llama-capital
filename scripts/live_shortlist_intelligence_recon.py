@@ -18,14 +18,14 @@ from tools.universe_shortlister import UniverseShortlister
 from workflows.intelligence_pipeline import (
     IntelligencePipeline,
 )
+from workflows.llama_capital_orchestrator import (
+    LlamaCapitalOrchestrator,
+)
 from workflows.shortlist_intelligence_pipeline import (
     ShortlistIntelligencePipeline,
 )
 from workflows.universe_discovery_pipeline import (
     UniverseDiscoveryPipeline,
-)
-from workflows.shortlist_research_pipeline import (
-    ShortlistResearchPipeline,
 )
 
 
@@ -35,51 +35,14 @@ def main() -> None:
         config=UNIVERSE_V01,
     )
 
-    market_data_provider = (
-        FinnhubMarketDataProvider()
-    )
+    market_data_provider = FinnhubMarketDataProvider()
 
-    discovery_pipeline = UniverseDiscoveryPipeline(
-        universe_provider=universe_provider,
-        market_data_provider=market_data_provider,
-    )
-
-    discovery_result = discovery_pipeline.run()
-
-    shortlister = UniverseShortlister(
-        max_candidates=3,
-    )
-
-    shortlist = shortlister.select(
-        discovery_result.screening_results
-    )
-    if discovery_result.failures:
-        print()
-        print("=" * 100)
-        print("UNIVERSE SCREENING FAILURES")
-        print("=" * 100)
-
-        for failure in discovery_result.failures:
-            print(
-                failure.ticker,
-                "|",
-                failure.reason,
-            )
-    print()
-    print("=" * 100)
-    print("LIVE INTELLIGENCE SHORTLIST")
-    print("=" * 100)
-
-    for rank, candidate in enumerate(
-        shortlist.candidates,
-        start=1,
-    ):
-        print(
-            f"#{rank} "
-            f"{candidate.stock.ticker} | "
-            f"{candidate.stock.company} | "
-            f"screening score: {candidate.score}"
+    universe_discovery_pipeline = (
+        UniverseDiscoveryPipeline(
+            universe_provider=universe_provider,
+            market_data_provider=market_data_provider,
         )
+    )
 
     embedding_model = SentenceTransformer(
         "sentence-transformers/all-MiniLM-L6-v2"
@@ -101,7 +64,7 @@ def main() -> None:
         evidence_matcher=evidence_matcher,
     )
 
-    shortlist_pipeline = (
+    shortlist_intelligence_pipeline = (
         ShortlistIntelligencePipeline(
             intelligence_pipeline=(
                 intelligence_pipeline
@@ -109,163 +72,168 @@ def main() -> None:
         )
     )
 
-    result = shortlist_pipeline.run(
-        shortlist.candidates,
+    llama = LlamaCapitalOrchestrator(
+        universe_discovery_pipeline=(
+            universe_discovery_pipeline
+        ),
+        shortlist_intelligence_pipeline=(
+            shortlist_intelligence_pipeline
+        ),
+        shortlister=UniverseShortlister(
+            max_candidates=5,
+        ),
+    )
+
+    result = llama.run(
         max_evidence=10,
     )
 
     print()
     print("=" * 100)
-    print("INTELLIGENCE RESULTS")
+    print("UNIVERSE SCREENING")
     print("=" * 100)
 
-    for candidate in shortlist.candidates:
+    for screening in result.universe.screening_results:
+        print(
+            screening.stock.ticker,
+            "|",
+            screening.score,
+            "|",
+            "PASS" if screening.passed else "FAIL",
+        )
+
+    if result.universe.failures:
+        print()
+        print("Universe failures:")
+
+        for failure in result.universe.failures:
+            print(
+                failure.ticker,
+                "|",
+                failure.reason,
+            )
+
+    print()
+    print("=" * 100)
+    print("SHORTLIST")
+    print("=" * 100)
+
+    for rank, candidate in enumerate(
+        result.shortlist.candidates,
+        start=1,
+    ):
+        print(
+            f"#{rank}",
+            candidate.stock.ticker,
+            "|",
+            candidate.stock.company,
+            "|",
+            candidate.score,
+        )
+
+    print()
+    print("=" * 100)
+    print("INTELLIGENCE")
+    print("=" * 100)
+
+    for candidate in result.shortlist.candidates:
         ticker = candidate.stock.ticker
 
         analyses = (
-            result.analyses_by_ticker.get(
+            result.intelligence
+            .analyses_by_ticker.get(
                 ticker,
                 [],
             )
         )
 
         print()
-        print("-" * 100)
         print(
             ticker,
             "|",
             candidate.stock.company,
         )
-        print("-" * 100)
 
         if not analyses:
-            print("No intelligence events found.")
+            print("No intelligence events.")
             continue
 
-        for rank, analysis in enumerate(
-            analyses,
-            start=1,
-        ):
-            print()
-            print(f"Event #{rank}")
+        for analysis in analyses:
             print(
-                "Title:",
+                "-",
                 analysis.cluster.title,
             )
             print(
-                "Type:",
+                "  Type:",
                 analysis.event_type.value,
             )
             print(
-                "Article kind:",
-                analysis.article_kind.value,
-            )
-            print(
-                "Primary:",
-                analysis.is_primary_event,
-            )
-            print(
-                "Impact:",
-                analysis.impact_direction.value,
-            )
-            print(
-                "Impact score:",
-                analysis.impact_score,
-            )
-            print(
-                "Opportunity score:",
+                "  Opportunity:",
                 analysis.opportunity_score,
             )
             print(
-                "Eligible:",
+                "  Eligible:",
                 analysis.eligible_for_research,
             )
             print(
-                "Eligibility reason:",
+                "  Reason:",
                 analysis.eligibility_reason,
             )
 
-            sources = [
-                item.source
-                for item
-                in analysis.cluster.evidence_items
-            ]
+    if result.intelligence.failures:
+        print()
+        print("Intelligence failures:")
 
-            print(
-                "Sources:",
-                sources,
-            )
-
-    print()
-    print("=" * 100)
-    print("INTELLIGENCE FAILURES")
-    print("=" * 100)
-
-    if not result.failures:
-        print("None")
-    else:
-        for failure in result.failures:
+        for failure in result.intelligence.failures:
             print(
                 failure.ticker,
                 "|",
                 failure.reason,
             )
-    research_pipeline = (
-        ShortlistResearchPipeline()
-    )
-
-    research_result = research_pipeline.run(
-        result
-    )
 
     print()
     print("=" * 100)
-    print("RESEARCH RESULTS")
+    print("RESEARCH")
     print("=" * 100)
 
-    for candidate in shortlist.candidates:
+    for candidate in result.shortlist.candidates:
         ticker = candidate.stock.ticker
 
-        pipeline_result = (
-            research_result.results_by_ticker.get(
+        research = (
+            result.research
+            .results_by_ticker.get(
                 ticker
             )
         )
 
         print()
-        print("-" * 100)
         print(
             ticker,
             "|",
             candidate.stock.company,
         )
-        print("-" * 100)
 
-        if pipeline_result is None:
-            print(
-                "No research result."
-            )
+        if research is None:
+            print("No research result.")
             continue
 
         print(
             "Status:",
-            pipeline_result.status.value,
+            research.status.value,
         )
 
         print(
             "Reason:",
-            pipeline_result.reason,
+            research.reason,
         )
 
-        if pipeline_result.selected_event:
+        if research.selected_event:
             print(
                 "Selected event:",
-                pipeline_result.selected_event,
+                research.selected_event,
             )
 
-        report = (
-            pipeline_result.research_report
-        )
+        report = research.research_report
 
         if report is None:
             continue
@@ -281,68 +249,57 @@ def main() -> None:
         )
 
         print(
-            "Summary:",
-            report.summary,
+            "QA:",
+            research.qa_passed,
         )
 
         print(
-            "QA Passed:",
-            pipeline_result.qa_passed,
+            "iQA:",
+            research.iqa_passed,
         )
 
-        print(
-            "iQA Passed:",
-            pipeline_result.iqa_passed,
-        )
+    if result.research.failures:
+        print()
+        print("Research failures:")
 
-        if pipeline_result.qa_issues:
-            print("QA Issues:")
-
-            for issue in pipeline_result.qa_issues:
-                print(
-                    "-",
-                    issue,
-                )
-
-        if pipeline_result.iqa_issues:
-            print("iQA Issues:")
-
-            for issue in pipeline_result.iqa_issues:
-                print(
-                    "-",
-                    issue,
-                )
-
-        print("Strengths:")
-
-        for strength in report.strengths:
-            print(
-                "-",
-                strength,
-            )
-
-        print("Risks:")
-
-        for risk in report.risks:
-            print(
-                "-",
-                risk,
-            )
-
-    print()
-    print("=" * 100)
-    print("RESEARCH FAILURES")
-    print("=" * 100)
-
-    if not research_result.failures:
-        print("None")
-    else:
-        for failure in research_result.failures:
+        for failure in result.research.failures:
             print(
                 failure.ticker,
                 "|",
                 failure.reason,
             )
+
+    print()
+    print("=" * 100)
+    print("COMMITTEE")
+    print("=" * 100)
+
+    if not result.committee_decisions:
+        print("No committee candidates.")
+    else:
+        for decision in result.committee_decisions:
+            print()
+            print(
+                decision.stock.ticker,
+                "|",
+                decision.decision.value,
+            )
+
+            print(
+                "Allocation:",
+                f"{decision.allocation_percent}%",
+            )
+
+            print(
+                "Confidence:",
+                decision.confidence,
+            )
+
+            for reason in decision.rationale:
+                print(
+                    "-",
+                    reason,
+                )
 
 
 if __name__ == "__main__":
