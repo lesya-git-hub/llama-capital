@@ -27,6 +27,7 @@ from workflows.shortlist_intelligence_pipeline import (
 from workflows.universe_discovery_pipeline import (
     UniverseDiscoveryPipeline,
 )
+from tools.source_quality import get_source_type
 
 
 def main() -> None:
@@ -179,6 +180,34 @@ def main() -> None:
                 "  Reason:",
                 analysis.eligibility_reason,
             )
+            print(
+                "  Corroboration:",
+                analysis.corroboration_score,
+            )
+
+            print(
+                "  Evidence:"
+            )
+
+            for item in analysis.cluster.evidence_items:
+                print(
+                    "   - Source:",
+                    item.source,
+                )
+                print(
+                    "     Source type:",
+                    get_source_type(
+                        item.source
+                    ).value,
+                )
+                print(
+                    "     Headline:",
+                    item.headline,
+                )
+                print(
+                    "     URL:",
+                    item.url,
+                )
 
     if result.intelligence.failures:
         print()

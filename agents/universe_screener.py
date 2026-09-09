@@ -17,23 +17,37 @@ class UniverseScreener:
 
         if market_cap_billion >= 1:
             score += 25
-            reasons.append("Market capitalization is at least $1 billion.")
+            reasons.append(
+                "Market capitalization is at least $1 billion."
+            )
 
         if revenue_growth_percent >= 15:
             score += 35
-            reasons.append("Revenue growth is at least 15%.")
+            reasons.append(
+                "Revenue growth is at least 15%."
+            )
 
         if debt_to_equity <= 1:
             score += 20
-            reasons.append("Debt-to-equity is within the accepted range.")
+            reasons.append(
+                "Debt-to-equity is within the accepted range."
+            )
 
         if above_200_ema:
             score += 20
-            reasons.append("Price is above the 200-day EMA.")
+            reasons.append(
+                "Price is above the 200-day EMA."
+            )
+
+        ranking_score = (
+            revenue_growth_percent
+            - (debt_to_equity * 10)
+        )
 
         return ScreeningResult(
             stock=stock,
             passed=score >= 70,
             score=score,
+            ranking_score=ranking_score,
             reasons=reasons,
         )

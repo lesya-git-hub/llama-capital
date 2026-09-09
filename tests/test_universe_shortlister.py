@@ -78,3 +78,42 @@ def test_shortlister_rejects_invalid_limit() -> None:
         UniverseShortlister(
             max_candidates=0
         )
+def test_shortlister_uses_ranking_score_to_break_score_ties():
+    weaker = ScreeningResult(
+        stock=Stock(
+            ticker="WEAK",
+            company="Weaker",
+            sector="Test",
+            industry="Test",
+            exchange="Test",
+        ),
+        passed=True,
+        score=100,
+        ranking_score=20,
+        reasons=[],
+    )
+
+    stronger = ScreeningResult(
+        stock=Stock(
+            ticker="STRONG",
+            company="Stronger",
+            sector="Test",
+            industry="Test",
+            exchange="Test",
+        ),
+        passed=True,
+        score=100,
+        ranking_score=50,
+        reasons=[],
+    )
+
+    shortlist = UniverseShortlister(
+        max_candidates=1
+    ).select(
+        [weaker, stronger]
+    )
+
+    assert (
+        shortlist.candidates[0].stock.ticker
+        == "STRONG"
+    )

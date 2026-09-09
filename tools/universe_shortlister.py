@@ -26,7 +26,10 @@ class UniverseShortlister:
 
         ranked = sorted(
             eligible,
-            key=lambda result: result.score,
+            key=lambda result: (
+                result.score,
+                result.ranking_score,
+            ),
             reverse=True,
         )
 
