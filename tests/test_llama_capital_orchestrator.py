@@ -1,3 +1,4 @@
+from uuid import UUID
 from models.shortlist_intelligence_result import (
     ShortlistIntelligenceResult,
 )
@@ -149,6 +150,7 @@ def test_llama_capital_orchestrates_stages_in_order() -> None:
     result = orchestrator.run(
         max_evidence=5
     )
+    assert UUID(result.run_id)
 
     assert calls == [
         "universe",
@@ -170,3 +172,42 @@ def test_llama_capital_orchestrates_stages_in_order() -> None:
         == {}
     )
     assert result.committee_decisions == []
+
+def test_llama_capital_run_ids_are_unique() -> None:
+    calls: list[str] = []
+
+    orchestrator = LlamaCapitalOrchestrator(
+        universe_discovery_pipeline=(
+            FakeUniverseDiscoveryPipeline(
+                calls
+            )
+        ),
+        shortlist_intelligence_pipeline=(
+            FakeIntelligencePipeline(
+                calls
+            )
+        ),
+        shortlister=FakeShortlister(
+            calls
+        ),
+        shortlist_research_pipeline=(
+            FakeResearchPipeline(
+                calls
+            )
+        ),
+        candidate_builder=(
+            FakeCandidateBuilder(
+                calls
+            )
+        ),
+        committee_pipeline=(
+            FakeCommitteePipeline(
+                calls
+            )
+        ),
+    )
+
+    first_result = orchestrator.run()
+    second_result = orchestrator.run()
+
+    assert first_result.run_id != second_result.run_id

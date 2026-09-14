@@ -1,3 +1,4 @@
+from uuid import uuid4
 from pydantic import Field
 
 from models.base import LCModel
@@ -13,8 +14,10 @@ from models.universe_discovery_result import (
 )
 from models.universe_shortlist import UniverseShortlist
 
-
 class LlamaCapitalRunResult(LCModel):
+    run_id: str = Field(
+        default_factory=lambda: str(uuid4())
+    )
     universe: UniverseDiscoveryResult
     shortlist: UniverseShortlist
     intelligence: ShortlistIntelligenceResult
