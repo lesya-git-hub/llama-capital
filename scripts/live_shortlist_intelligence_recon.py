@@ -28,6 +28,7 @@ from workflows.universe_discovery_pipeline import (
     UniverseDiscoveryPipeline,
 )
 from tools.source_quality import get_source_type
+from providers.run_store import RunStore
 
 
 def main() -> None:
@@ -89,10 +90,17 @@ def main() -> None:
         max_evidence=10,
     )
 
+    run_store = RunStore()
+    saved_path = run_store.save(result)
+
+    print()
+    print("RUN ARCHIVE")
+    print("Run ID:", result.run_id)
+    print("Saved:", saved_path)
+
     print()
     print("=" * 100)
     print("UNIVERSE SCREENING")
-    print("=" * 100)
 
     for screening in result.universe.screening_results:
         print(
