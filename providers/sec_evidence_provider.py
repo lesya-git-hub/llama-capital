@@ -43,6 +43,92 @@ class SECEvidenceProvider(BaseEvidenceProvider):
                 "Accept-Encoding": "gzip, deflate",
             }
         )
+    @staticmethod
+    def find_exhibit_99_1(
+        items: list[dict],
+    ) -> str | None:
+        for item in items:
+            name = item.get("name", "").lower()
+
+            if (
+                "ex991" in name
+                or "ex99-1" in name
+                or "ex99_1" in name
+            ):
+                return item["name"]
+
+        return None
+    def _get_filing_directory(
+        self,
+        cik: str,
+        accession_number: str,
+    ) -> list[dict]:
+        accession_clean = accession_number.replace(
+            "-",
+            "",
+        )
+
+        url = (
+            "https://www.sec.gov/Archives/edgar/data/"
+            f"{int(cik)}/{accession_clean}/index.json"
+        )
+
+        response = self.session.get(
+            url,
+            timeout=20,
+        )
+        response.raise_for_status()
+
+        return response.json()["directory"]["item"]
+    
+    def _fetch_exhibit_99_1(
+        self,
+        stock: Stock,
+        cik: str,
+        accession_number: str,
+        filing_date: str,
+    ) -> Evidence | None:
+        try:
+            items = self._get_filing_directory(
+                cik,
+                accession_number,
+            )
+        except requests.RequestException:
+            return None
+
+        document = self.find_exhibit_99_1(
+            items
+        )
+
+        if document is None:
+            return None
+
+        accession_clean = accession_number.replace(
+            "-",
+            "",
+        )
+
+        url = self.ARCHIVES_URL.format(
+            cik_int=int(cik),
+            accession=accession_clean,
+            document=document,
+        )
+
+        content = self._fetch_filing_text(
+            url
+        )
+
+        return Evidence(
+            stock=stock,
+            source="SEC",
+            headline=(
+                f"{stock.company} Exhibit 99.1 "
+                f"filed on {filing_date}"
+            ),
+            content=content,
+            url=url,
+        )
+
 
     def _fetch_filing_text(
         self,
@@ -178,6 +264,7 @@ class SECEvidenceProvider(BaseEvidenceProvider):
             recent["accessionNumber"],
             recent["primaryDocument"],
         ):
+            
             if form not in useful_forms:
                 continue
 
@@ -211,6 +298,18 @@ class SECEvidenceProvider(BaseEvidenceProvider):
                     url=url,
                 )
             )
+            if form == "8-K":
+                exhibit = self._fetch_exhibit_99_1(
+                    stock=stock,
+                    cik=cik,
+                    accession_number=accession_number,
+                    filing_date=filing_date,
+                )
+
+                if exhibit is not None:
+                    evidence_items.append(
+                        exhibit
+                    )
 
             if len(evidence_items) >= 10:
                 break
