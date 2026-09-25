@@ -240,3 +240,156 @@ def test_same_financial_period_can_match(
         news,
         filing,
     ) is True
+
+def test_conflicting_financial_amounts_do_not_match(
+    monkeypatch,
+) -> None:
+    matcher = EvidenceMatcher.__new__(
+        EvidenceMatcher
+    )
+
+    matcher.threshold = 0.65
+
+    news = make_evidence(
+        "Palantir Q2 2026 commercial revenue",
+        (
+            "Palantir reported Q2 2026 "
+            "commercial revenue of $945 million."
+        ),
+    )
+
+    filing = make_evidence(
+        "Palantir Q2 2026 financial results",
+        (
+            "Palantir reported Q2 2026 "
+            "commercial revenue of $764 million."
+        ),
+        source="SEC",
+    )
+
+    monkeypatch.setattr(
+        matcher,
+        "similarity",
+        lambda first, second: 0.95,
+    )
+
+    assert matcher.matches(
+        news,
+        filing,
+    ) is False
+def test_matching_financial_amounts_can_match(
+    monkeypatch,
+) -> None:
+    matcher = EvidenceMatcher.__new__(
+        EvidenceMatcher
+    )
+
+    matcher.threshold = 0.65
+
+    news = make_evidence(
+        "Palantir Q2 2026 commercial revenue",
+        (
+            "Palantir reported Q2 2026 "
+            "commercial revenue of $764 million."
+        ),
+    )
+
+    filing = make_evidence(
+        "Palantir Q2 2026 financial results",
+        (
+            "Palantir reported Q2 2026 "
+            "commercial revenue of $764 million."
+        ),
+        source="SEC",
+    )
+
+    monkeypatch.setattr(
+        matcher,
+        "similarity",
+        lambda first, second: 0.95,
+    )
+
+    assert matcher.matches(
+        news,
+        filing,
+    ) is True
+
+def test_matching_amount_survives_extra_sec_amounts(
+    monkeypatch,
+) -> None:
+    matcher = EvidenceMatcher.__new__(
+        EvidenceMatcher
+    )
+
+    matcher.threshold = 0.65
+
+    news = make_evidence(
+        "Palantir Q2 2026 commercial revenue",
+        (
+            "Palantir reported Q2 2026 "
+            "commercial revenue of $764 million."
+        ),
+    )
+
+    filing = make_evidence(
+        "Palantir Q2 2026 financial results",
+        (
+            "Palantir reported financial results "
+            "for Q2 2026. "
+            "U.S. revenue was $1.573 billion. "
+            "U.S. commercial revenue was $764 million. "
+            "U.S. government revenue was $809 million. "
+            "Total revenue was $1.935 billion."
+        ),
+        source="SEC",
+    )
+
+    monkeypatch.setattr(
+        matcher,
+        "similarity",
+        lambda first, second: 0.95,
+    )
+
+    assert matcher.matches(
+        news,
+        filing,
+    ) is True
+
+def test_same_amount_for_different_metric_does_not_match(
+    monkeypatch,
+) -> None:
+    matcher = EvidenceMatcher.__new__(
+        EvidenceMatcher
+    )
+
+    matcher.threshold = 0.65
+
+    news = make_evidence(
+        "Palantir Q2 2026 commercial revenue",
+        (
+            "Palantir reported Q2 2026 "
+            "commercial revenue of $945 million."
+        ),
+    )
+
+    filing = make_evidence(
+        "Palantir Q2 2026 financial results",
+        (
+            "Palantir reported financial results "
+            "for Q2 2026. "
+            "U.S. commercial revenue was $764 million. "
+            "Another financial metric was $945 million."
+        ),
+        source="SEC",
+    )
+
+    monkeypatch.setattr(
+        matcher,
+        "similarity",
+        lambda first, second: 0.95,
+    )
+
+    assert matcher.matches(
+        news,
+        filing,
+    ) is False

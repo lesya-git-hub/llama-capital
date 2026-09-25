@@ -194,12 +194,114 @@ class EvidenceMatcher:
 
         return None
 
+    @staticmethod
+    def extract_money_amounts(
+        evidence: Evidence,
+    ) -> set[tuple[float, str]]:
+        text = (
+            f"{evidence.headline} "
+            f"{evidence.content}"
+        ).lower()
 
+        matches = re.findall(
+            r"\$(\d+(?:\.\d+)?)\s*"
+            r"(million|billion|m|b)\b",
+            text,
+        )
+
+        normalized: set[tuple[float, str]] = set()
+
+        for value, unit in matches:
+            normalized_unit = (
+                "million"
+                if unit in {"million", "m"}
+                else "billion"
+            )
+
+            normalized.add(
+                (
+                    float(value),
+                    normalized_unit,
+                )
+            )
+
+        return normalized
+    
+    @staticmethod
+    def extract_financial_claims(
+        evidence: Evidence,
+    ) -> dict[str, set[tuple[float, str]]]:
+        text = (
+            f"{evidence.headline} "
+            f"{evidence.content}"
+        ).lower()
+
+        claims: dict[
+            str,
+            set[tuple[float, str]],
+        ] = {}
+
+        patterns = {
+            "commercial_revenue": (
+                r"(?:u\.s\.\s+)?commercial revenue"
+                r".{0,40}?"
+                r"\$(\d+(?:\.\d+)?)\s*"
+                r"(million|billion|m|b)\b"
+            ),
+        }
+
+        for metric, pattern in patterns.items():
+            matches = re.findall(
+                pattern,
+                text,
+                flags=re.IGNORECASE,
+            )
+
+            if not matches:
+                continue
+
+            values: set[tuple[float, str]] = set()
+
+            for value, unit in matches:
+                normalized_unit = (
+                    "million"
+                    if unit in {"million", "m"}
+                    else "billion"
+                )
+
+                values.add(
+                    (
+                        float(value),
+                        normalized_unit,
+                    )
+                )
+
+            claims[metric] = values
+
+        return claims
+    
     def matches(
         self,
         first: Evidence,
         second: Evidence,
     ) -> bool:
+        first_claims = self.extract_financial_claims(
+            first
+        )
+        second_claims = self.extract_financial_claims(
+            second
+        )
+
+        shared_metrics = (
+            first_claims.keys()
+            & second_claims.keys()
+        )
+
+        for metric in shared_metrics:
+            if first_claims[metric].isdisjoint(
+                second_claims[metric]
+            ):
+                return False
         first_period = self.extract_financial_period(
             first
         )
@@ -211,6 +313,19 @@ class EvidenceMatcher:
             first_period is not None
             and second_period is not None
             and first_period != second_period
+        ):
+            return False
+        first_amounts = self.extract_money_amounts(
+            first
+        )
+        second_amounts = self.extract_money_amounts(
+            second
+        )
+
+        if (
+            first_amounts
+            and second_amounts
+            and first_amounts.isdisjoint(second_amounts)
         ):
             return False
         if not self.anchors_compatible(
