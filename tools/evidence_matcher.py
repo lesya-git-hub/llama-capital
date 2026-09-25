@@ -152,12 +152,67 @@ class EvidenceMatcher:
             )
 
         return chunks
+    
+    @staticmethod
+    def extract_financial_period(
+        evidence: Evidence,
+    ) -> tuple[str, str] | None:
+        text = (
+            f"{evidence.headline} "
+            f"{evidence.content}"
+        ).lower()
+
+        quarter_patterns = {
+            "Q1": (
+                r"\bq1\s+(\d{4})\b",
+                r"\bfirst quarter(?: of)?\s+(\d{4})\b",
+            ),
+            "Q2": (
+                r"\bq2\s+(\d{4})\b",
+                r"\bsecond quarter(?: of)?\s+(\d{4})\b",
+            ),
+            "Q3": (
+                r"\bq3\s+(\d{4})\b",
+                r"\bthird quarter(?: of)?\s+(\d{4})\b",
+            ),
+            "Q4": (
+                r"\bq4\s+(\d{4})\b",
+                r"\bfourth quarter(?: of)?\s+(\d{4})\b",
+            ),
+        }
+
+        for quarter, patterns in quarter_patterns.items():
+            for pattern in patterns:
+                match = re.search(
+                    pattern,
+                    text,
+                    flags=re.IGNORECASE,
+                )
+
+                if match:
+                    return quarter, match.group(1)
+
+        return None
+
 
     def matches(
         self,
         first: Evidence,
         second: Evidence,
     ) -> bool:
+        first_period = self.extract_financial_period(
+            first
+        )
+        second_period = self.extract_financial_period(
+            second
+        )
+
+        if (
+            first_period is not None
+            and second_period is not None
+            and first_period != second_period
+        ):
+            return False
         if not self.anchors_compatible(
             first,
             second,
@@ -180,3 +235,4 @@ class EvidenceMatcher:
                 return True
 
         return False
+

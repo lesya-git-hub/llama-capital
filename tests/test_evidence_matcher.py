@@ -167,3 +167,76 @@ def test_matches_when_relevant_chunk_exceeds_threshold(
         news,
         filing,
     ) is True
+
+def test_different_financial_periods_do_not_match(
+    monkeypatch,
+) -> None:
+    matcher = EvidenceMatcher.__new__(
+        EvidenceMatcher
+    )
+
+    matcher.threshold = 0.65
+
+    news = make_evidence(
+        "Palantir Q2 2026 earnings",
+        (
+            "Palantir reported financial results "
+            "for the second quarter of 2026."
+        ),
+    )
+
+    filing = make_evidence(
+        "Palantir Q1 2026 earnings",
+        (
+            "Palantir announced financial results "
+            "for the first quarter of 2026."
+        ),
+        source="SEC",
+    )
+
+    monkeypatch.setattr(
+        matcher,
+        "similarity",
+        lambda first, second: 0.90,
+    )
+
+    assert matcher.matches(
+        news,
+        filing,
+    ) is False
+def test_same_financial_period_can_match(
+    monkeypatch,
+) -> None:
+    matcher = EvidenceMatcher.__new__(
+        EvidenceMatcher
+    )
+
+    matcher.threshold = 0.65
+
+    news = make_evidence(
+        "Palantir Q2 2026 earnings",
+        (
+            "Palantir reported financial results "
+            "for the second quarter of 2026."
+        ),
+    )
+
+    filing = make_evidence(
+        "Palantir Q2 2026 earnings",
+        (
+            "Palantir announced financial results "
+            "for the second quarter of 2026."
+        ),
+        source="SEC",
+    )
+
+    monkeypatch.setattr(
+        matcher,
+        "similarity",
+        lambda first, second: 0.90,
+    )
+
+    assert matcher.matches(
+        news,
+        filing,
+    ) is True
