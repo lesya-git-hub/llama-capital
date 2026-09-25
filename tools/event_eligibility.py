@@ -1,5 +1,6 @@
 from models.event_analysis import EventAnalysis, EventType
-
+from models.source_quality import SourceType
+from tools.source_quality import get_source_type
 
 ELIGIBLE_EVENT_TYPES = {
     EventType.CONTRACT,
@@ -17,6 +18,29 @@ VALUATION_COMMENTARY_TERMS = (
     "times earnings",
     "valuation",
 )
+def has_sufficient_evidence(
+    analysis: EventAnalysis,
+) -> bool:
+    source_types = {
+        get_source_type(item.source)
+        for item in analysis.cluster.evidence_items
+    }
+
+    if SourceType.OFFICIAL in source_types:
+        return True
+
+    if SourceType.PRIMARY_NEWS in source_types:
+        return True
+
+    secondary_sources = {
+        item.source
+        for item in analysis.cluster.evidence_items
+        if get_source_type(item.source)
+        == SourceType.SECONDARY_NEWS
+    }
+
+    return len(secondary_sources) >= 2
+
 
 def get_event_eligibility_reason(
     analysis: EventAnalysis,
@@ -30,6 +54,9 @@ def get_event_eligibility_reason(
 
     if analysis.event_type not in ELIGIBLE_EVENT_TYPES:
         return False, "event type is not eligible"
+
+    if not has_sufficient_evidence(analysis):
+        return False, "insufficient evidence grounding"
 
     if analysis.opportunity_score < minimum_opportunity_score:
         return (

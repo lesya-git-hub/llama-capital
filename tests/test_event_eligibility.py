@@ -1,5 +1,6 @@
 from models.evidence import Evidence
 from models.event_analysis import (
+    ArticleKind,
     EventAnalysis,
     EventType,
     ImpactDirection,
@@ -22,6 +23,7 @@ def make_analysis(
     opportunity_score: float,
     article_kind: ArticleKind = ArticleKind.CORPORATE_EVENT,
     is_primary_event: bool = True,
+    sources: list[str] | None = None,
 ) -> EventAnalysis:
     stock = Stock(
         ticker="RKLB",
@@ -31,18 +33,24 @@ def make_analysis(
         exchange="NASDAQ",
     )
 
-    evidence = Evidence(
-        stock=stock,
-        source="Reuters",
-        headline="Rocket Lab event",
-        content="",
-        url="https://example.com",
-    )
+    if sources is None:
+        sources = ["Reuters"]
+
+    evidence_items = [
+        Evidence(
+            stock=stock,
+            source=source,
+            headline="Rocket Lab event",
+            content="",
+            url=f"https://example.com/{index}",
+        )
+        for index, source in enumerate(sources)
+    ]
 
     cluster = EventCluster(
         stock=stock,
-        title=evidence.headline,
-        evidence_items=[evidence],
+        title="Rocket Lab event",
+        evidence_items=evidence_items,
     )
 
     return EventAnalysis(
@@ -122,3 +130,42 @@ def test_valuation_headline_is_vetoed_even_if_llm_calls_it_primary() -> None:
     )
 
     assert is_event_eligible(analysis) is False
+
+def test_single_secondary_source_is_insufficient() -> None:
+    analysis = make_analysis(
+        EventType.CONTRACT,
+        80.0,
+        sources=["Yahoo"],
+    )
+
+    assert is_event_eligible(analysis) is False
+
+
+def test_two_distinct_secondary_sources_are_sufficient() -> None:
+    analysis = make_analysis(
+        EventType.CONTRACT,
+        80.0,
+        sources=["Yahoo", "Benzinga"],
+    )
+
+    assert is_event_eligible(analysis) is True
+
+
+def test_single_official_source_is_sufficient() -> None:
+    analysis = make_analysis(
+        EventType.CONTRACT,
+        80.0,
+        sources=["SEC"],
+    )
+
+    assert is_event_eligible(analysis) is True
+
+
+def test_single_primary_news_source_is_sufficient() -> None:
+    analysis = make_analysis(
+        EventType.CONTRACT,
+        80.0,
+        sources=["Reuters"],
+    )
+
+    assert is_event_eligible(analysis) is True

@@ -30,6 +30,16 @@ class EvidenceMatcher:
         text = text.lower()
 
         anchors: set[str] = set()
+        if any(
+            term in text
+            for term in (
+                "earnings",
+                "revenue",
+                "financial results",
+                "results of operations",
+            )
+        ):
+            anchors.add("financial_results")
 
         terms = {
             "iridium",
@@ -40,10 +50,10 @@ class EvidenceMatcher:
             "nite-star",
             "merger",
             "acquisition",
-            "earnings",
-            "revenue",
             "equity distribution",
             "chief accounting officer",
+            "financial results",
+            "results of operations",
         }
 
         for term in terms:
@@ -113,6 +123,35 @@ class EvidenceMatcher:
         )
 
         return float(similarities[0][1])
+    
+    @staticmethod
+    def chunk_evidence(
+        evidence: Evidence,
+    ) -> list[Evidence]:
+        sentences = re.split(
+            r"(?<=[.!?])\s+",
+            evidence.content or "",
+        )
+
+        chunks: list[Evidence] = []
+
+        for sentence in sentences:
+            sentence = sentence.strip()
+
+            if not sentence:
+                continue
+
+            chunks.append(
+                Evidence(
+                    stock=evidence.stock,
+                    source=evidence.source,
+                    headline=evidence.headline,
+                    content=sentence,
+                    url=evidence.url,
+                )
+            )
+
+        return chunks
 
     def matches(
         self,
@@ -125,7 +164,19 @@ class EvidenceMatcher:
         ):
             return False
 
-        return (
-            self.similarity(first, second)
-            >= self.threshold
-        )
+        chunks = self.chunk_evidence(second)
+
+        for chunk in chunks:
+            if not self.anchors_compatible(
+                first,
+                chunk,
+            ):
+                continue
+
+            if (
+                self.similarity(first, chunk)
+                >= self.threshold
+            ):
+                return True
+
+        return False

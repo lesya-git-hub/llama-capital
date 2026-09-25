@@ -120,3 +120,50 @@ def test_shared_anchor_below_threshold_fails(
         news,
         filing,
     ) is False
+def test_matches_when_relevant_chunk_exceeds_threshold(
+    monkeypatch,
+) -> None:
+    matcher = EvidenceMatcher.__new__(
+        EvidenceMatcher
+    )
+
+    matcher.threshold = 0.65
+
+    news = make_evidence(
+        "PLTR commercial revenue surges in Q2",
+        "Palantir reported strong Q2 revenue growth.",
+    )
+
+    filing = make_evidence(
+        "Palantir filed 8-K",
+        (
+            "General filing introduction and legal language. "
+            "The company announced its financial results "
+            "for the second quarter. "
+            "Additional unrelated disclosure follows."
+        ),
+        source="SEC",
+    )
+
+    def fake_similarity(
+        first: Evidence,
+        second: Evidence,
+    ) -> float:
+        if (
+            "financial results" 
+            in second.content
+        ):
+            return 0.80
+
+        return 0.30
+
+    monkeypatch.setattr(
+        matcher,
+        "similarity",
+        fake_similarity,
+    )
+
+    assert matcher.matches(
+        news,
+        filing,
+    ) is True
