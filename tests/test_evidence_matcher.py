@@ -393,3 +393,114 @@ def test_same_amount_for_different_metric_does_not_match(
         news,
         filing,
     ) is False
+
+def test_extracts_commercial_revenue_amount_after_growth_text() -> None:
+    evidence = make_evidence(
+        "Palantir Q2 2026 financial results",
+        (
+            "U.S. commercial revenue grew 149% "
+            "year-over-year and 28% "
+            "quarter-over-quarter to $764 million."
+        ),
+        source="SEC",
+    )
+
+    claims = EvidenceMatcher.extract_financial_claims(
+        evidence
+    )
+
+    assert claims == {
+        "commercial_revenue": {
+            (764.0, "million")
+        }
+    }
+def test_commercial_revenue_claim_does_not_capture_later_amount() -> None:
+    evidence = make_evidence(
+        "Palantir Q2 2026 financial results",
+        (
+            "U.S. commercial revenue grew 149% "
+            "year-over-year and 28% "
+            "quarter-over-quarter to $764 million. "
+            "Another financial metric later reached "
+            "$3.424 billion."
+        ),
+        source="SEC",
+    )
+
+    claims = EvidenceMatcher.extract_financial_claims(
+        evidence
+    )
+
+    assert claims == {
+        "commercial_revenue": {
+            (764.0, "million")
+        }
+    }
+def test_commercial_revenue_claim_does_not_capture_unrelated_amount_from_second_occurrence() -> None:
+    evidence = make_evidence(
+        "Palantir Q2 2026 financial results",
+        (
+            "U.S. commercial revenue grew 149% "
+            "year-over-year and 28% "
+            "quarter-over-quarter to $764 million. "
+            "U.S. commercial revenue continued to grow strongly. "
+            "Total contract value reached $3.424 billion."
+        ),
+        source="SEC",
+    )
+
+    claims = EvidenceMatcher.extract_financial_claims(
+        evidence
+    )
+
+    assert claims == {
+        "commercial_revenue": {
+            (764.0, "million")
+        }
+    }
+def test_commercial_revenue_claim_does_not_cross_bullet_boundary() -> None:
+    evidence = make_evidence(
+        "Palantir Q2 2026 financial results",
+        (
+            "U.S. commercial revenue grew 149% "
+            "year-over-year and 28% "
+            "quarter-over-quarter to $764 million "
+            "◦ U.S. government revenue grew 90% "
+            "year-over-year "
+            "• Total contract value reached "
+            "$3.424 billion"
+        ),
+        source="SEC",
+    )
+
+    claims = EvidenceMatcher.extract_financial_claims(
+        evidence
+    )
+
+    assert claims == {
+        "commercial_revenue": {
+            (764.0, "million")
+        }
+    }
+def test_commercial_revenue_claim_excludes_guidance() -> None:
+    evidence = make_evidence(
+        "Palantir Q2 2026 financial results",
+        (
+            "U.S. commercial revenue grew 149% "
+            "year-over-year and 28% "
+            "quarter-over-quarter to $764 million. "
+            "U.S. commercial revenue guidance to "
+            "in excess of $3.424 billion."
+        ),
+        source="SEC",
+    )
+
+    claims = EvidenceMatcher.extract_financial_claims(
+        evidence
+    )
+
+    assert claims == {
+        "commercial_revenue": {
+            (764.0, "million")
+        }
+    }

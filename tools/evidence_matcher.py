@@ -244,7 +244,8 @@ class EvidenceMatcher:
         patterns = {
             "commercial_revenue": (
                 r"(?:u\.s\.\s+)?commercial revenue"
-                r".{0,40}?"
+                r"(?!\s+guidance\b)"
+                r"[^.!?]{0,100}?"
                 r"\$(\d+(?:\.\d+)?)\s*"
                 r"(million|billion|m|b)\b"
             ),
