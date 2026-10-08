@@ -1,7 +1,10 @@
 from models.evidence import Evidence
 from models.stock import Stock
 from tools.evidence_matcher import EvidenceMatcher
-
+from models.financial_claim import (
+    FinancialClaimStatus,
+    FinancialPeriod,
+)
 
 def make_evidence(
     headline: str,
@@ -504,3 +507,156 @@ def test_commercial_revenue_claim_excludes_guidance() -> None:
             (764.0, "million")
         }
     }
+def test_commercial_revenue_claim_distinguishes_quarter_from_full_year() -> None:
+    evidence = make_evidence(
+        "Palantir Q4 2025 financial results",
+        (
+            "U.S. commercial revenue grew 137% "
+            "year-over-year and 28% "
+            "quarter-over-quarter to $507 million. "
+            "Full year U.S. commercial revenue grew "
+            "109% year-over-year to $1.465 billion."
+        ),
+        source="SEC",
+    )
+
+    claims = EvidenceMatcher.extract_financial_claims(
+        evidence
+    )
+
+    assert claims == {
+        "commercial_revenue": {
+            (507.0, "million")
+        }
+    }
+def test_commercial_revenue_claim_excludes_full_year_outlook() -> None:
+    evidence = make_evidence(
+        "Palantir Q4 2025 financial results",
+        (
+            "Q4 2025 highlights: "
+            "U.S. commercial revenue grew 137% "
+            "year-over-year and 28% "
+            "quarter-over-quarter to $507 million. "
+            "For full year 2026, we expect: "
+            "U.S. commercial revenue in excess of "
+            "$3.144 billion."
+        ),
+        source="SEC",
+    )
+
+    claims = EvidenceMatcher.extract_financial_claims(
+        evidence
+    )
+
+    assert claims == {
+        "commercial_revenue": {
+            (507.0, "million")
+        }
+    }
+def test_extracts_structured_commercial_revenue_claim() -> None:
+    evidence = make_evidence(
+        "Palantir Q4 2025 financial results",
+        (
+            "U.S. commercial revenue grew 137% "
+            "year-over-year and 28% "
+            "quarter-over-quarter to $507 million."
+        ),
+        source="SEC",
+    )
+
+    claims = (
+        EvidenceMatcher
+        .extract_structured_financial_claims(evidence)
+    )
+
+    assert len(claims) == 1
+    assert claims[0].metric == "commercial_revenue"
+    assert claims[0].value == 507.0
+    assert claims[0].unit == "million"
+    assert claims[0].period == FinancialPeriod.QUARTER
+    assert claims[0].year == 2025
+    assert claims[0].quarter == 4
+    assert claims[0].status == FinancialClaimStatus.ACTUAL
+
+def test_structured_claim_identifies_q4_actual() -> None:
+    evidence = make_evidence(
+        "Palantir Q4 2025 financial results",
+        (
+            "Q4 2025 Highlights "
+            "U.S. commercial revenue grew 137% "
+            "year-over-year and 28% "
+            "quarter-over-quarter to $507 million."
+        ),
+        source="SEC",
+    )
+
+    claims = (
+        EvidenceMatcher
+        .extract_structured_financial_claims(evidence)
+    )
+
+    assert len(claims) == 1
+
+    claim = claims[0]
+
+    assert claim.period == FinancialPeriod.QUARTER
+    assert claim.year == 2025
+    assert claim.quarter == 4
+    assert claim.status == FinancialClaimStatus.ACTUAL
+def test_structured_claim_distinguishes_q4_and_full_year_actuals() -> None:
+    evidence = make_evidence(
+        "Palantir Q4 2025 financial results",
+        (
+            "Q4 2025 Highlights "
+            "U.S. commercial revenue grew 137% "
+            "year-over-year to $507 million. "
+            "FY 2025 Highlights "
+            "U.S. commercial revenue grew 109% "
+            "year-over-year to $1.465 billion."
+        ),
+        source="SEC",
+    )
+
+    claims = (
+        EvidenceMatcher
+        .extract_structured_financial_claims(evidence)
+    )
+
+    assert len(claims) == 2
+
+    quarterly_claim = claims[0]
+    full_year_claim = claims[1]
+
+    assert quarterly_claim.period == FinancialPeriod.QUARTER
+    assert quarterly_claim.year == 2025
+    assert quarterly_claim.quarter == 4
+
+    assert full_year_claim.period == FinancialPeriod.FULL_YEAR
+    assert full_year_claim.year == 2025
+    assert full_year_claim.quarter is None
+    assert full_year_claim.status == FinancialClaimStatus.ACTUAL
+
+def test_structured_claim_identifies_full_year_guidance() -> None:
+    evidence = make_evidence(
+        "Palantir Q4 2025 financial results",
+        (
+            "For full year 2026, we expect: "
+            "U.S. commercial revenue in excess of "
+            "$3.144 billion."
+        ),
+        source="SEC",
+    )
+
+    claims = (
+        EvidenceMatcher
+        .extract_structured_financial_claims(evidence)
+    )
+
+    assert len(claims) == 1
+
+    claim = claims[0]
+
+    assert claim.period == FinancialPeriod.FULL_YEAR
+    assert claim.year == 2026
+    assert claim.quarter is None
+    assert claim.status == FinancialClaimStatus.GUIDANCE

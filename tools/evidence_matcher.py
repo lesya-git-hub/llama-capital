@@ -1,6 +1,11 @@
 import re
 
 from models.evidence import Evidence
+from models.financial_claim import (
+    FinancialClaim,
+    FinancialClaimStatus,
+    FinancialPeriod,
+)
 
 
 class EvidenceMatcher:
@@ -123,7 +128,7 @@ class EvidenceMatcher:
         )
 
         return float(similarities[0][1])
-    
+
     @staticmethod
     def chunk_evidence(
         evidence: Evidence,
@@ -152,7 +157,7 @@ class EvidenceMatcher:
             )
 
         return chunks
-    
+
     @staticmethod
     def extract_financial_period(
         evidence: Evidence,
@@ -226,61 +231,7 @@ class EvidenceMatcher:
             )
 
         return normalized
-    
-    @staticmethod
-    def extract_financial_claims(
-        evidence: Evidence,
-    ) -> dict[str, set[tuple[float, str]]]:
-        text = (
-            f"{evidence.headline} "
-            f"{evidence.content}"
-        ).lower()
 
-        claims: dict[
-            str,
-            set[tuple[float, str]],
-        ] = {}
-
-        patterns = {
-            "commercial_revenue": (
-                r"(?:u\.s\.\s+)?commercial revenue"
-                r"(?!\s+guidance\b)"
-                r"[^.!?]{0,100}?"
-                r"\$(\d+(?:\.\d+)?)\s*"
-                r"(million|billion|m|b)\b"
-            ),
-        }
-
-        for metric, pattern in patterns.items():
-            matches = re.findall(
-                pattern,
-                text,
-                flags=re.IGNORECASE,
-            )
-
-            if not matches:
-                continue
-
-            values: set[tuple[float, str]] = set()
-
-            for value, unit in matches:
-                normalized_unit = (
-                    "million"
-                    if unit in {"million", "m"}
-                    else "billion"
-                )
-
-                values.add(
-                    (
-                        float(value),
-                        normalized_unit,
-                    )
-                )
-
-            claims[metric] = values
-
-        return claims
-    
     def matches(
         self,
         first: Evidence,
@@ -303,6 +254,7 @@ class EvidenceMatcher:
                 second_claims[metric]
             ):
                 return False
+
         first_period = self.extract_financial_period(
             first
         )
@@ -316,6 +268,7 @@ class EvidenceMatcher:
             and first_period != second_period
         ):
             return False
+
         first_amounts = self.extract_money_amounts(
             first
         )
@@ -329,6 +282,7 @@ class EvidenceMatcher:
             and first_amounts.isdisjoint(second_amounts)
         ):
             return False
+
         if not self.anchors_compatible(
             first,
             second,
@@ -352,3 +306,150 @@ class EvidenceMatcher:
 
         return False
 
+    @staticmethod
+    def extract_structured_financial_claims(
+        evidence: Evidence,
+    ) -> list[FinancialClaim]:
+        text = (
+            f"{evidence.headline} "
+            f"{evidence.content}"
+        ).lower()
+
+        claims: list[FinancialClaim] = []
+
+        pattern = (
+            r"(?:u\.s\.\s+)?commercial revenue"
+            r"[^.!?]{0,100}?"
+            r"\$(\d+(?:\.\d+)?)\s*"
+            r"(million|billion|m|b)\b"
+        )
+
+        for match in re.finditer(
+            pattern,
+            text,
+            flags=re.IGNORECASE,
+        ):
+            value, unit = match.groups()
+
+            normalized_unit = (
+                "million"
+                if unit in {"million", "m"}
+                else "billion"
+            )
+
+            claim_period = FinancialPeriod.UNKNOWN
+            claim_year: int | None = None
+            claim_quarter: int | None = None
+
+            context_before = text[:match.start()]
+
+            scope_matches = list(
+                re.finditer(
+                    (
+                        r"\b(?:q([1-4])|(fy|full year))"
+                        r"\s+(\d{4})\b"
+                    ),
+                    context_before,
+                    flags=re.IGNORECASE,
+                )
+            )
+
+            if scope_matches:
+                scope_match = scope_matches[-1]
+
+                quarter_value = scope_match.group(1)
+                fiscal_year_value = scope_match.group(2)
+                scope_year = int(scope_match.group(3))
+
+                if quarter_value is not None:
+                    claim_period = FinancialPeriod.QUARTER
+                    claim_year = scope_year
+                    claim_quarter = int(quarter_value)
+
+                elif fiscal_year_value is not None:
+                    claim_period = FinancialPeriod.FULL_YEAR
+                    claim_year = scope_year
+            # Recognise full-year claims without an explicit year.
+            local_context = text[
+                max(0, match.start() - 15):match.start()
+            ]
+
+            if re.search(r"\bfull year\s+$", local_context):
+                claim_period = FinancialPeriod.FULL_YEAR
+                claim_quarter = None
+            claim_status = FinancialClaimStatus.ACTUAL
+
+            scope_context = (
+                context_before[scope_matches[-1].start():]
+                if scope_matches
+                else ""
+            )
+
+            claim_context = text[
+                match.start():match.end()
+            ]
+
+            if (
+                "we expect" in scope_context
+                or "guidance" in scope_context
+                or "outlook" in scope_context
+                or "guidance" in claim_context
+            ):
+                claim_status = FinancialClaimStatus.GUIDANCE
+
+            claims.append(
+                FinancialClaim(
+                    metric="commercial_revenue",
+                    value=float(value),
+                    unit=normalized_unit,
+                    period=claim_period,
+                    year=claim_year,
+                    quarter=claim_quarter,
+                    status=claim_status,
+                )
+            )
+
+        return claims
+
+    @staticmethod
+    def extract_financial_claims(
+        evidence: Evidence,
+    ) -> dict[str, set[tuple[float, str]]]:
+        structured_claims = (
+            EvidenceMatcher
+            .extract_structured_financial_claims(evidence)
+        )
+
+        document_period = (
+            EvidenceMatcher.extract_financial_period(evidence)
+        )
+
+        claims: dict[
+            str,
+            set[tuple[float, str]],
+        ] = {}
+
+        for claim in structured_claims:
+            if claim.status != FinancialClaimStatus.ACTUAL:
+                continue
+
+            if document_period is not None:
+                quarter, year = document_period
+
+                if claim.period != FinancialPeriod.QUARTER:
+                    continue
+
+                if claim.year != int(year):
+                    continue
+
+                if claim.quarter != int(quarter[1]):
+                    continue
+
+            claims.setdefault(
+                claim.metric,
+                set(),
+            ).add(
+                (claim.value, claim.unit)
+            )
+
+        return claims
