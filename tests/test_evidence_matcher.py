@@ -689,3 +689,67 @@ def test_reporting_quarter_precedes_guidance_quarter():
     ) == {
         "commercial_revenue": {(507.0, "million")}
     }
+
+def test_matching_revenue_survives_additional_guidance(
+    monkeypatch,
+) -> None:
+    matcher = EvidenceMatcher.__new__(EvidenceMatcher)
+    matcher.threshold = 0.65
+
+    monkeypatch.setattr(
+        matcher,
+        "similarity",
+        lambda first, second: 0.95,
+    )
+
+    news = make_evidence(
+        "Palantir Q4 2025 financial results",
+        (
+            "Palantir reported Q4 2025 "
+            "U.S. commercial revenue of $507 million."
+        ),
+    )
+
+    filing = make_evidence(
+        "Palantir Q4 2025 financial results",
+        (
+            "Q4 2025 Highlights: "
+            "U.S. commercial revenue was $507 million. "
+            "For full year 2026, we expect: "
+            "U.S. commercial revenue in excess of "
+            "$3.144 billion."
+        ),
+        source="SEC",
+    )
+
+    assert matcher.matches(news, filing) is True
+def test_same_amount_for_different_revenue_metrics_fails(
+    monkeypatch,
+) -> None:
+    matcher = EvidenceMatcher.__new__(EvidenceMatcher)
+    matcher.threshold = 0.65
+
+    monkeypatch.setattr(
+        matcher,
+        "similarity",
+        lambda first, second: 0.95,
+    )
+
+    news = make_evidence(
+        "Palantir Q2 2026 financial results",
+        (
+            "Palantir reported Q2 2026 "
+            "commercial revenue of $764 million."
+        ),
+    )
+
+    filing = make_evidence(
+        "Palantir Q2 2026 financial results",
+        (
+            "Palantir reported Q2 2026 "
+            "government revenue of $764 million."
+        ),
+        source="SEC",
+    )
+
+    assert matcher.matches(news, filing) is False

@@ -256,7 +256,12 @@ class EvidenceMatcher:
             first_claims.keys()
             & second_claims.keys()
         )
-
+        if (
+            first_claims
+            and second_claims
+            and not shared_metrics
+        ):
+            return False
         for metric in shared_metrics:
             if first_claims[metric].isdisjoint(
                 second_claims[metric]
@@ -326,8 +331,9 @@ class EvidenceMatcher:
         claims: list[FinancialClaim] = []
 
         pattern = (
-            r"(?:u\.s\.\s+)?commercial revenue"
-            r"[^.!?]{0,100}?"
+            r"(?:u\.s\.\s+)?"
+            r"(commercial|government) revenue"
+            r"[^.!?◦•\n]{0,100}?"
             r"\$(\d+(?:\.\d+)?)\s*"
             r"(million|billion|m|b)\b"
         )
@@ -337,7 +343,7 @@ class EvidenceMatcher:
             text,
             flags=re.IGNORECASE,
         ):
-            value, unit = match.groups()
+            revenue_type, value, unit = match.groups()
 
             normalized_unit = (
                 "million"
@@ -407,7 +413,7 @@ class EvidenceMatcher:
 
             claims.append(
                 FinancialClaim(
-                    metric="commercial_revenue",
+                    metric=f"{revenue_type}_revenue",
                     value=float(value),
                     unit=normalized_unit,
                     period=claim_period,
