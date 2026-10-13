@@ -660,3 +660,32 @@ def test_structured_claim_identifies_full_year_guidance() -> None:
     assert claim.year == 2026
     assert claim.quarter is None
     assert claim.status == FinancialClaimStatus.GUIDANCE
+
+def test_reporting_quarter_precedes_guidance_quarter():
+    evidence = Evidence(
+        stock=Stock(
+            ticker="PLTR",
+            company="Palantir Technologies",
+            sector="Technology",
+            industry="Software",
+            exchange="NASDAQ",
+        ),
+        source="SEC",
+        headline="Palantir Reports Q4 2025 Results",
+        content=(
+            "Q4 2025 highlights: U.S. commercial revenue "
+            "grew to $507 million. "
+            "For Q1 2026, we expect continued growth."
+        ),
+        url="https://www.sec.gov/",
+    )
+
+    assert EvidenceMatcher.extract_financial_period(
+        evidence
+    ) == ("Q4", "2025")
+
+    assert EvidenceMatcher.extract_financial_claims(
+        evidence
+    ) == {
+        "commercial_revenue": {(507.0, "million")}
+    }

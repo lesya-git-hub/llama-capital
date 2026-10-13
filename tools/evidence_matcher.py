@@ -186,18 +186,26 @@ class EvidenceMatcher:
             ),
         }
 
+        candidates = []
+
         for quarter, patterns in quarter_patterns.items():
             for pattern in patterns:
-                match = re.search(
-                    pattern,
-                    text,
-                    flags=re.IGNORECASE,
-                )
+                match = re.search(pattern, text)
 
                 if match:
-                    return quarter, match.group(1)
+                    candidates.append(
+                        (match.start(), quarter, match.group(1))
+                    )
 
-        return None
+        if not candidates:
+            return None
+
+        _, quarter, year = min(
+            candidates,
+            key=lambda item: item[0],
+        )
+
+        return quarter, year
 
     @staticmethod
     def extract_money_amounts(
