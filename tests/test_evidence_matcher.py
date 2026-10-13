@@ -293,7 +293,7 @@ def test_matching_financial_amounts_can_match(
         "Palantir Q2 2026 commercial revenue",
         (
             "Palantir reported Q2 2026 "
-            "commercial revenue of $764 million."
+            "U.S. commercial revenue of $764 million."
         ),
     )
 
@@ -301,7 +301,7 @@ def test_matching_financial_amounts_can_match(
         "Palantir Q2 2026 financial results",
         (
             "Palantir reported Q2 2026 "
-            "commercial revenue of $764 million."
+            "U.S. commercial revenue of $764 million."
         ),
         source="SEC",
     )
@@ -330,7 +330,7 @@ def test_matching_amount_survives_extra_sec_amounts(
         "Palantir Q2 2026 commercial revenue",
         (
             "Palantir reported Q2 2026 "
-            "commercial revenue of $764 million."
+            "U.S. commercial revenue of $764 million."
         ),
     )
 
@@ -413,7 +413,7 @@ def test_extracts_commercial_revenue_amount_after_growth_text() -> None:
     )
 
     assert claims == {
-        "commercial_revenue": {
+        "US:commercial_revenue": {
             (764.0, "million")
         }
     }
@@ -435,7 +435,7 @@ def test_commercial_revenue_claim_does_not_capture_later_amount() -> None:
     )
 
     assert claims == {
-        "commercial_revenue": {
+        "US:commercial_revenue": {
             (764.0, "million")
         }
     }
@@ -457,7 +457,7 @@ def test_commercial_revenue_claim_does_not_capture_unrelated_amount_from_second_
     )
 
     assert claims == {
-        "commercial_revenue": {
+        "US:commercial_revenue": {
             (764.0, "million")
         }
     }
@@ -481,7 +481,7 @@ def test_commercial_revenue_claim_does_not_cross_bullet_boundary() -> None:
     )
 
     assert claims == {
-        "commercial_revenue": {
+        "US:commercial_revenue": {
             (764.0, "million")
         }
     }
@@ -503,7 +503,7 @@ def test_commercial_revenue_claim_excludes_guidance() -> None:
     )
 
     assert claims == {
-        "commercial_revenue": {
+        "US:commercial_revenue": {
             (764.0, "million")
         }
     }
@@ -525,7 +525,7 @@ def test_commercial_revenue_claim_distinguishes_quarter_from_full_year() -> None
     )
 
     assert claims == {
-        "commercial_revenue": {
+        "US:commercial_revenue": {
             (507.0, "million")
         }
     }
@@ -549,7 +549,7 @@ def test_commercial_revenue_claim_excludes_full_year_outlook() -> None:
     )
 
     assert claims == {
-        "commercial_revenue": {
+        "US:commercial_revenue": {
             (507.0, "million")
         }
     }
@@ -687,7 +687,7 @@ def test_reporting_quarter_precedes_guidance_quarter():
     assert EvidenceMatcher.extract_financial_claims(
         evidence
     ) == {
-        "commercial_revenue": {(507.0, "million")}
+        "US:commercial_revenue": {(507.0, "million")}
     }
 
 def test_matching_revenue_survives_additional_guidance(
@@ -748,6 +748,68 @@ def test_same_amount_for_different_revenue_metrics_fails(
         (
             "Palantir reported Q2 2026 "
             "government revenue of $764 million."
+        ),
+        source="SEC",
+    )
+
+    assert matcher.matches(news, filing) is False
+
+def test_same_revenue_different_geography_does_not_match(
+    monkeypatch,
+) -> None:
+    matcher = EvidenceMatcher.__new__(EvidenceMatcher)
+    matcher.threshold = 0.65
+
+    monkeypatch.setattr(
+        matcher,
+        "similarity",
+        lambda first, second: 0.95,
+    )
+
+    news = make_evidence(
+        "Palantir Q2 2026 financial results",
+        (
+            "Palantir reported Q2 2026 "
+            "U.S. commercial revenue of $764 million."
+        ),
+    )
+
+    filing = make_evidence(
+        "Palantir Q2 2026 financial results",
+        (
+            "Palantir reported Q2 2026 "
+            "global commercial revenue of $764 million."
+        ),
+        source="SEC",
+    )
+
+    assert matcher.matches(news, filing) is False
+
+def test_unknown_geography_does_not_confirm_us_revenue(
+    monkeypatch,
+) -> None:
+    matcher = EvidenceMatcher.__new__(EvidenceMatcher)
+    matcher.threshold = 0.65
+
+    monkeypatch.setattr(
+        matcher,
+        "similarity",
+        lambda first, second: 0.95,
+    )
+
+    news = make_evidence(
+        "Palantir Q2 2026 financial results",
+        (
+            "Palantir reported Q2 2026 "
+            "commercial revenue of $764 million."
+        ),
+    )
+
+    filing = make_evidence(
+        "Palantir Q2 2026 financial results",
+        (
+            "Palantir reported Q2 2026 "
+            "U.S. commercial revenue of $764 million."
         ),
         source="SEC",
     )

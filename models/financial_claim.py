@@ -19,6 +19,7 @@ class FinancialClaim(LCModel):
     metric: str
     value: float
     unit: str
+    geography: str | None = None
     period: FinancialPeriod = FinancialPeriod.UNKNOWN
     year: int | None = None
     quarter: int | None = None

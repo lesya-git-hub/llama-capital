@@ -331,7 +331,7 @@ class EvidenceMatcher:
         claims: list[FinancialClaim] = []
 
         pattern = (
-            r"(?:u\.s\.\s+)?"
+            r"\b(u\.s\.|us|global|worldwide)?\s*"
             r"(commercial|government) revenue"
             r"[^.!?◦•\n]{0,100}?"
             r"\$(\d+(?:\.\d+)?)\s*"
@@ -343,7 +343,14 @@ class EvidenceMatcher:
             text,
             flags=re.IGNORECASE,
         ):
-            revenue_type, value, unit = match.groups()
+            geography_raw, revenue_type, value, unit = match.groups()
+
+            geography = None
+
+            if geography_raw in {"u.s.", "us"}:
+                geography = "US"
+            elif geography_raw in {"global", "worldwide"}:
+                geography = "GLOBAL"
 
             normalized_unit = (
                 "million"
@@ -416,6 +423,7 @@ class EvidenceMatcher:
                     metric=f"{revenue_type}_revenue",
                     value=float(value),
                     unit=normalized_unit,
+                    geography=geography,
                     period=claim_period,
                     year=claim_year,
                     quarter=claim_quarter,
@@ -459,8 +467,14 @@ class EvidenceMatcher:
                 if claim.quarter != int(quarter[1]):
                     continue
 
+            metric_key = (
+                f"{claim.geography}:{claim.metric}"
+                if claim.geography is not None
+                else claim.metric
+            )
+
             claims.setdefault(
-                claim.metric,
+                metric_key,
                 set(),
             ).add(
                 (claim.value, claim.unit)
