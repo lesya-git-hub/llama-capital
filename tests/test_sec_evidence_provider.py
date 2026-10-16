@@ -129,3 +129,58 @@ def test_fetches_exhibit_99_1(
         "a2026q2ex991pressrelease.htm"
         in evidence.url
     )
+def test_filing_text_preserves_table_rows() -> None:
+    provider = SECEvidenceProvider.__new__(
+        SECEvidenceProvider
+    )
+
+    class FakeResponse:
+        text = (
+            "<html><body><table>"
+            "<tr><td>Commercial revenue</td>"
+            "<td>$764 million</td></tr>"
+            "<tr><td>Government revenue</td>"
+            "<td>$809 million</td></tr>"
+            "</table></body></html>"
+        )
+
+        def raise_for_status(self) -> None:
+            pass
+
+    class FakeSession:
+        def get(
+            self,
+            url: str,
+            timeout: int,
+        ) -> FakeResponse:
+            assert timeout == 20
+            return FakeResponse()
+
+    provider.session = FakeSession()
+
+    result = provider._fetch_filing_text(
+        "https://www.sec.gov/test.htm"
+    )
+
+    assert "Commercial revenue $764 million" in result
+    assert "Government revenue $809 million" in result
+    assert (
+        "Commercial revenue $764 million\n"
+        "Government revenue $809 million"
+    ) in result
+def test_relevant_filing_text_preserves_table_rows() -> None:
+    provider = SECEvidenceProvider.__new__(
+        SECEvidenceProvider
+    )
+
+    text = (
+        "Commercial revenue $764 million\n"
+        "Government revenue $809 million"
+    )
+
+    result = provider._extract_relevant_filing_text(
+        text,
+        form="10-Q",
+    )
+
+    assert result == text

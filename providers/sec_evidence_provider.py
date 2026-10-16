@@ -155,7 +155,13 @@ class SECEvidenceProvider(BaseEvidenceProvider):
             text,
             flags=re.IGNORECASE | re.DOTALL,
         )
-
+        # Preserve financial table row boundaries.
+        text = re.sub(
+            r"</tr\s*>",
+            "\n",
+            text,
+            flags=re.IGNORECASE,
+        )
         text = re.sub(
             r"<[^>]+>",
             " ",
@@ -164,9 +170,16 @@ class SECEvidenceProvider(BaseEvidenceProvider):
 
         text = html.unescape(text)
 
+        # Normalize spaces without removing row boundaries.
         text = re.sub(
-            r"\s+",
+            r"[^\S\n]+",
             " ",
+            text,
+        )
+
+        text = re.sub(
+            r" *\n *",
+            "\n",
             text,
         ).strip()
 
@@ -195,9 +208,16 @@ class SECEvidenceProvider(BaseEvidenceProvider):
             flags=re.IGNORECASE,
         )
 
+        # Preserve financial table row boundaries.
         text = re.sub(
-            r"\s+",
+            r"[^\S\n]+",
             " ",
+            text,
+        )
+
+        text = re.sub(
+            r" *\n *",
+            "\n",
             text,
         ).strip()
 
