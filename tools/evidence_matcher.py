@@ -251,7 +251,10 @@ class EvidenceMatcher:
         second_claims = self.extract_financial_claims(
             second
         )
-
+        # A recognised financial claim must be corroborated
+        # by a corresponding structured claim.
+        if bool(first_claims) != bool(second_claims):
+            return False
         shared_metrics = (
             first_claims.keys()
             & second_claims.keys()
@@ -318,17 +321,119 @@ class EvidenceMatcher:
                 return True
 
         return False
+    @staticmethod
+    def extract_table_financial_claims(
+        evidence: Evidence,
+    ) -> list[FinancialClaim]:
+        claims: list[FinancialClaim] = []
 
+        lines = evidence.content.lower().splitlines()
+
+        for index, line in enumerate(lines):
+            headers = [
+                cell.strip()
+                for cell in line.split("|")
+            ]
+
+            if len(headers) < 2:
+                continue
+
+            periods = [
+                re.fullmatch(r"q([1-4])\s+(\d{4})", cell)
+                for cell in headers
+            ]
+
+            if not all(periods):
+                continue
+
+            for row in lines[index + 1:]:
+                cells = [
+                    cell.strip()
+                    for cell in row.split("|")
+                ]
+
+                if len(cells) != len(headers) + 1:
+                    break
+
+                metric_match = re.fullmatch(
+                    r"(u\.s\.|us|global|worldwide)?\s*"
+                    r"(commercial|government) revenue",
+                    cells[0],
+                )
+
+                if metric_match is None:
+                    continue
+
+                geography_raw, revenue_type = metric_match.groups()
+
+                geography = None
+                if geography_raw in {"u.s.", "us"}:
+                    geography = "US"
+                elif geography_raw in {"global", "worldwide"}:
+                    geography = "GLOBAL"
+
+                for period, amount in zip(periods, cells[1:]):
+                    if period is None:
+                        continue
+
+                    amount_match = re.fullmatch(
+                        r"\$(\d+(?:\.\d+)?)\s*"
+                        r"(million|billion|m|b)",
+                        amount,
+                    )
+
+                    if amount_match is None:
+                        continue
+
+                    value, unit = amount_match.groups()
+
+                    claims.append(
+                        FinancialClaim(
+                            metric=f"{revenue_type}_revenue",
+                            value=float(value),
+                            unit=(
+                                "million"
+                                if unit in {"million", "m"}
+                                else "billion"
+                            ),
+                            geography=geography,
+                            period=FinancialPeriod.QUARTER,
+                            year=int(period.group(2)),
+                            quarter=int(period.group(1)),
+                            status=FinancialClaimStatus.ACTUAL,
+                        )
+                    )
+
+        return claims
     @staticmethod
     def extract_structured_financial_claims(
         evidence: Evidence,
     ) -> list[FinancialClaim]:
+        claims = EvidenceMatcher.extract_table_financial_claims(
+            evidence
+        )
+        lines = evidence.content.lower().splitlines()
+
+        for index, line in enumerate(lines):
+            headers = [
+                cell.strip()
+                for cell in line.split("|")
+            ]
+
+            if (
+                len(headers) >= 2
+                and all(
+                    re.fullmatch(r"q[1-4]\s+\d{4}", cell)
+                    for cell in headers
+                )
+            ):
+                lines = lines[:index]
+                break
+
         text = (
             f"{evidence.headline} "
-            f"{evidence.content}"
+            + "\n".join(lines)
         ).lower()
-
-        claims: list[FinancialClaim] = []
 
         pattern = (
             r"\b(u\.s\.|us|global|worldwide)?\s*"
