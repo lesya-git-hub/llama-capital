@@ -971,3 +971,59 @@ def test_sec_table_confirms_current_year_revenue(
         matcher.extract_structured_financial_claims(filing),
     )
     assert matcher.matches(news, filing) is True
+def test_sec_table_does_not_confirm_wrong_revenue_metric(
+    monkeypatch,
+) -> None:
+    matcher = EvidenceMatcher.__new__(EvidenceMatcher)
+    matcher.threshold = 0.65
+
+    monkeypatch.setattr(
+        matcher,
+        "similarity",
+        lambda first, second: 0.95,
+    )
+
+    news = make_evidence(
+        "Palantir Q2 2026 financial results",
+        "Palantir reported Q2 2026 U.S. government revenue of $764 million.",
+    )
+
+    filing = make_evidence(
+        "Palantir Q2 2026 financial results",
+        (
+            "Q2 2026 | Q2 2025\n"
+            "U.S. commercial revenue | $764 million | $306 million\n"
+            "U.S. government revenue | $809 million | $426 million"
+        ),
+        source="SEC",
+    )
+
+    assert matcher.matches(news, filing) is False
+def test_sec_table_confirms_metric_when_values_are_equal(
+    monkeypatch,
+) -> None:
+    matcher = EvidenceMatcher.__new__(EvidenceMatcher)
+    matcher.threshold = 0.65
+
+    monkeypatch.setattr(
+        matcher,
+        "similarity",
+        lambda first, second: 0.95,
+    )
+
+    news = make_evidence(
+        "Palantir Q2 2026 financial results",
+        "Palantir reported Q2 2026 U.S. government revenue of $764 million.",
+    )
+
+    filing = make_evidence(
+        "Palantir Q2 2026 financial results",
+        (
+            "Q2 2026 | Q2 2025\n"
+            "U.S. commercial revenue | $764 million | $306 million\n"
+            "U.S. government revenue | $764 million | $426 million"
+        ),
+        source="SEC",
+    )
+
+    assert matcher.matches(news, filing) is True
