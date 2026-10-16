@@ -815,3 +815,65 @@ def test_unknown_geography_does_not_confirm_us_revenue(
     )
 
     assert matcher.matches(news, filing) is False
+def test_sec_table_rows_keep_revenue_metrics_separate(
+    monkeypatch,
+) -> None:
+    matcher = EvidenceMatcher.__new__(EvidenceMatcher)
+    matcher.threshold = 0.65
+
+    monkeypatch.setattr(
+        matcher,
+        "similarity",
+        lambda first, second: 0.95,
+    )
+
+    news = make_evidence(
+        "Palantir Q2 2026 financial results",
+        (
+            "Palantir reported Q2 2026 "
+            "U.S. commercial revenue of $809 million."
+        ),
+    )
+
+    filing = make_evidence(
+        "Palantir Q2 2026 financial results",
+        (
+            "Q2 2026 Highlights\n"
+            "U.S. commercial revenue $764 million\n"
+            "U.S. government revenue $809 million"
+        ),
+        source="SEC",
+    )
+
+    assert matcher.matches(news, filing) is False
+def test_sec_table_confirms_correct_commercial_revenue(
+    monkeypatch,
+) -> None:
+    matcher = EvidenceMatcher.__new__(EvidenceMatcher)
+    matcher.threshold = 0.65
+
+    monkeypatch.setattr(
+        matcher,
+        "similarity",
+        lambda first, second: 0.95,
+    )
+
+    news = make_evidence(
+        "Palantir Q2 2026 financial results",
+        (
+            "Palantir reported Q2 2026 "
+            "U.S. commercial revenue of $764 million."
+        ),
+    )
+
+    filing = make_evidence(
+        "Palantir Q2 2026 financial results",
+        (
+            "Q2 2026 Highlights\n"
+            "U.S. commercial revenue $764 million\n"
+            "U.S. government revenue $809 million"
+        ),
+        source="SEC",
+    )
+
+    assert matcher.matches(news, filing) is True
