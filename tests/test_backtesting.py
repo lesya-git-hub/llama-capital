@@ -137,3 +137,40 @@ def test_flat_trade_is_not_a_win():
     )
 
     assert calculate_win_rate([trade]) == 0.0
+
+def test_trade_net_pnl_matches_cash_movements():
+    entry_price = 100.0
+    exit_price = 110.0
+    quantity = 10
+    fee_rate = 0.001
+    slippage_rate = 0.001
+
+    trade = calculate_trade_result(
+        entry_price=entry_price,
+        exit_price=exit_price,
+        quantity=quantity,
+        fee_rate=fee_rate,
+        slippage_rate=slippage_rate,
+    )
+
+    entry_cash_outflow = (
+        entry_price
+        * (1 + slippage_rate)
+        * quantity
+        * (1 + fee_rate)
+    )
+
+    exit_cash_inflow = (
+        exit_price
+        * (1 - slippage_rate)
+        * quantity
+        * (1 - fee_rate)
+    )
+
+    expected_net_pnl = exit_cash_inflow - entry_cash_outflow
+
+    assert trade.net_pnl == pytest.approx(expected_net_pnl)
+    assert trade.gross_pnl == pytest.approx(100.0)
+    assert trade.costs == pytest.approx(
+        trade.gross_pnl - expected_net_pnl
+    )

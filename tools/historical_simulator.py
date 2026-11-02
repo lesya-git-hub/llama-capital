@@ -31,7 +31,7 @@ def simulate_long_only(
     exit_signals: Sequence[bool],
     initial_cash: float = 10_000.0,
     max_position_fraction: float = 0.20,
-    atr_values: Sequence[float] | None = None,
+    atr_values: Sequence[float | None] | None = None,
     risk_fraction: float = 0.01,
     atr_multiplier: float = 1.5,
     fee_rate: float = 0.001,
@@ -45,15 +45,28 @@ def simulate_long_only(
     Signals at index t execute at the open of t+1.
     """
     n = len(opens)
+    
     if atr_values is not None:
         if len(atr_values) != n:
             raise ValueError("ATR length must match prices")
 
         if any(
-            not isfinite(atr) or atr <= 0
+            atr is not None
+            and (not isfinite(atr) or atr <= 0)
             for atr in atr_values
         ):
-            raise ValueError("ATR values must be finite and positive")
+            raise ValueError(
+                "ATR values must be finite and positive when provided"
+            )
+
+        if any(
+            entry_signals[day] and atr_values[day] is None
+            for day in range(n - 1)
+        ):
+            raise ValueError(
+                "Entry signal requires a valid ATR value"
+            )
+
 
     if not isfinite(risk_fraction) or not 0 < risk_fraction <= 1:
         raise ValueError("Invalid risk fraction")
@@ -125,6 +138,7 @@ def simulate_long_only(
     quantity = 0
     entry_price = 0.0
     stop_price = None
+    entry_day = None
     trades = []
     equity_curve = [initial_cash]
 
@@ -136,12 +150,20 @@ def simulate_long_only(
             exit_signals[signal_day]
             or (stop_price is not None and opening_price <= stop_price)
         ):
+            exit_reason = (
+                "stop_gap"
+                if stop_price is not None and opening_price <= stop_price
+                else "signal"
+            )
             trade = calculate_trade_result(
                 entry_price=entry_price,
                 exit_price=opening_price,
                 quantity=quantity,
                 fee_rate=fee_rate,
                 slippage_rate=slippage_rate,
+                exit_reason=exit_reason,
+                entry_day=entry_day,
+                exit_day=day,
             )
 
             cash += (
@@ -155,6 +177,7 @@ def simulate_long_only(
             quantity = 0
             entry_price = 0.0
             stop_price = None
+            entry_day = None
 
         elif quantity == 0 and entry_signals[signal_day]:
             effective_entry = opening_price * (1 + slippage_rate)
@@ -182,6 +205,7 @@ def simulate_long_only(
                 cash -= shares * cost_per_share
                 quantity = shares
                 entry_price = opening_price
+                entry_day = day
 
                 if atr_values is not None:
                     stop_price = (
@@ -203,6 +227,9 @@ def simulate_long_only(
                 entry_price=entry_price,
                 exit_price=stop_price,
                 quantity=quantity,
+                entry_day=entry_day,
+                exit_day=day,
+                exit_reason="stop_intraday",	
                 fee_rate=fee_rate,
                 slippage_rate=slippage_rate,
             )
@@ -218,6 +245,7 @@ def simulate_long_only(
             quantity = 0
             entry_price = 0.0
             stop_price = None
+            entry_day = None
         
         valuation_price = (
             closes[day] if closes is not None else opens[day]

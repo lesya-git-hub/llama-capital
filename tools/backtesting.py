@@ -15,6 +15,9 @@ class BacktestTrade:
     costs: float
     net_pnl: float
     return_pct: float
+    exit_reason: str = "unknown"
+    entry_day: int | None = None
+    exit_day: int | None = None
 
 
 def calculate_trade_result(
@@ -23,6 +26,9 @@ def calculate_trade_result(
     quantity: int,
     fee_rate: float = 0.001,
     slippage_rate: float = 0.001,
+    exit_reason: str = "unknown",
+    entry_day: int | None = None,
+    exit_day: int | None = None,
 ) -> BacktestTrade:
     """Calculate net P&L for a long trade with execution costs."""
 
@@ -73,9 +79,12 @@ def calculate_trade_result(
         exit_price=exit_price,
         quantity=quantity,
         gross_pnl=gross_pnl,
+        exit_reason=exit_reason,
         costs=costs,
         net_pnl=net_pnl,
         return_pct=(net_pnl / invested_capital) * 100,
+        entry_day=entry_day,
+        exit_day=exit_day,
     )
 
 

@@ -717,3 +717,108 @@ def test_simulator_flat_portfolio_has_zero_volatility():
 
     assert result.annualized_return_pct == pytest.approx(0.0)
     assert result.annualized_volatility_pct == pytest.approx(0.0)
+
+def test_simulator_accepts_atr_warmup_none():
+    result = simulate_long_only(
+        opens=[100, 100, 100, 100],
+        entry_signals=[False, False, True, False],
+        exit_signals=[False] * 4,
+        atr_values=[None, None, 2.0, 2.0],
+        initial_cash=1000,
+        fee_rate=0,
+        slippage_rate=0,
+    )
+
+    assert result.open_quantity > 0
+
+
+def test_simulator_rejects_entry_without_atr():
+    with pytest.raises(
+        ValueError,
+        match="Entry signal requires a valid ATR",
+    ):
+        simulate_long_only(
+            opens=[100, 100, 100],
+            entry_signals=[True, False, False],
+            exit_signals=[False] * 3,
+            atr_values=[None, 2.0, 2.0],
+        )
+
+def test_exit_reason_signal():
+    result = simulate_long_only(
+        opens=[100.0, 100.0, 110.0],
+        entry_signals=[True, False, False],
+        exit_signals=[False, True, False],
+        initial_cash=1000,
+        fee_rate=0,
+        slippage_rate=0,
+    )
+
+    assert len(result.trades) == 1
+    assert result.trades[0].exit_reason == "signal"
+
+
+def test_exit_reason_stop_gap():
+    result = simulate_long_only(
+        opens=[100.0, 100.0, 90.0],
+        entry_signals=[True, False, False],
+        exit_signals=[False, False, False],
+        atr_values=[2.0, 2.0, 2.0],
+        initial_cash=1000,
+        fee_rate=0,
+        slippage_rate=0,
+    )
+
+    assert len(result.trades) == 1
+    assert result.trades[0].exit_reason == "stop_gap"
+    assert result.trades[0].exit_price == pytest.approx(90.0)
+
+
+def test_exit_reason_stop_intraday():
+    result = simulate_long_only(
+        opens=[100.0, 100.0, 100.0],
+        lows=[100.0, 96.0, 100.0],
+        entry_signals=[True, False, False],
+        exit_signals=[False, False, False],
+        atr_values=[2.0, 2.0, 2.0],
+        initial_cash=1000,
+        fee_rate=0,
+        slippage_rate=0,
+    )
+
+    assert len(result.trades) == 1
+    assert result.trades[0].exit_reason == "stop_intraday"
+    assert result.trades[0].exit_price == pytest.approx(97.0)
+
+def test_trade_records_next_open_execution_days():
+    result = simulate_long_only(
+        opens=[100.0, 101.0, 102.0, 103.0],
+        entry_signals=[True, False, False, False],
+        exit_signals=[False, True, False, False],
+        initial_cash=1000,
+        fee_rate=0,
+        slippage_rate=0,
+    )
+
+    assert len(result.trades) == 1
+    assert result.trades[0].entry_day == 1
+    assert result.trades[0].exit_day == 2
+    assert result.trades[0].exit_reason == "signal"
+
+
+def test_trade_records_same_day_intraday_stop():
+    result = simulate_long_only(
+        opens=[100.0, 100.0, 100.0],
+        lows=[100.0, 96.0, 100.0],
+        entry_signals=[True, False, False],
+        exit_signals=[False, False, False],
+        atr_values=[2.0, 2.0, 2.0],
+        initial_cash=1000,
+        fee_rate=0,
+        slippage_rate=0,
+    )
+
+    assert len(result.trades) == 1
+    assert result.trades[0].entry_day == 1
+    assert result.trades[0].exit_day == 1
+    assert result.trades[0].exit_reason == "stop_intraday"
