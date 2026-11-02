@@ -822,3 +822,31 @@ def test_trade_records_same_day_intraday_stop():
     assert result.trades[0].entry_day == 1
     assert result.trades[0].exit_day == 1
     assert result.trades[0].exit_reason == "stop_intraday"
+
+def test_realized_trade_pnl_reconciles_with_final_cash():
+    initial_cash = 10_000.0
+
+    result = simulate_long_only(
+        opens=[100, 100, 110, 110, 120],
+        entry_signals=[True, False, True, False, False],
+        exit_signals=[False, True, False, True, False],
+        initial_cash=initial_cash,
+        max_position_fraction=1.0,
+        fee_rate=0.001,
+        slippage_rate=0.001,
+    )
+
+    assert len(result.trades) == 2
+    assert result.open_quantity == 0
+
+    realized_pnl = sum(
+        trade.net_pnl for trade in result.trades
+    )
+
+    assert result.final_cash == pytest.approx(
+        initial_cash + realized_pnl
+    )
+
+    assert result.final_equity == pytest.approx(
+        result.final_cash
+    )
