@@ -9,7 +9,14 @@ from tools.performance_metrics import (
     calculate_total_return,
     calculate_annualized_return,
     calculate_annualized_volatility,
+    calculate_sharpe_ratio,
 )
+
+from tools.trade_metrics import (
+    calculate_trade_expectancy,
+    calculate_trade_expectancy_pct,
+)
+
 from tools.backtesting import BacktestTrade, calculate_trade_result
 
 
@@ -24,6 +31,10 @@ class SimulationResult:
     total_return_pct: float
     annualized_return_pct: float
     annualized_volatility_pct: float
+    sharpe_ratio: float | None = None 
+    exposure_pct: float = 0.0
+    trade_expectancy: float | None = None
+    trade_expectancy_pct: float | None = None
 
 def simulate_long_only(
     opens: Sequence[float],
@@ -141,10 +152,14 @@ def simulate_long_only(
     entry_day = None
     trades = []
     equity_curve = [initial_cash]
+    invested_sessions = 0
+
 
     for day in range(1, n):
         signal_day = day - 1
         opening_price = opens[day]
+        held_during_session = quantity > 0
+
 
         if quantity > 0 and (
             exit_signals[signal_day]
@@ -204,6 +219,7 @@ def simulate_long_only(
             if shares > 0:
                 cash -= shares * cost_per_share
                 quantity = shares
+                held_during_session = True
                 entry_price = opening_price
                 entry_day = day
 
@@ -247,6 +263,12 @@ def simulate_long_only(
             stop_price = None
             entry_day = None
         
+        if quantity > 0:
+            held_during_session = True
+
+        if held_during_session:
+            invested_sessions += 1
+
         valuation_price = (
             closes[day] if closes is not None else opens[day]
         )
@@ -254,10 +276,6 @@ def simulate_long_only(
         equity_curve.append(
             cash + quantity * valuation_price
         )
-
-    
-    
-    
     
     
     return SimulationResult(
@@ -276,6 +294,14 @@ def simulate_long_only(
             if len(equity_curve) >= 3
             else 0.0
         ),
+        sharpe_ratio=(
+            calculate_sharpe_ratio(equity_curve)
+            if len(equity_curve) >= 3
+            else None
+        ),
+        exposure_pct=invested_sessions / (n - 1) * 100,
+        trade_expectancy=calculate_trade_expectancy(trades),
+        trade_expectancy_pct=calculate_trade_expectancy_pct(trades),
     )
 
 
