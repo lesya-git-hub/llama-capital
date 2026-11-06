@@ -1,5 +1,11 @@
 # Daily USD market data and research signals — V2 Sprint 1B
 
+**Trust boundary:** this is the legacy, unverified research interface. A source
+name or `final=True` does not authenticate exchange or provider authority. Use
+the [Sprint 1C strict verification entry point](market_verification.md) for pinned
+calendar and provider-evidence checks. Existing 1B behavior remains unchanged;
+its runs are not silently promoted to trusted runs.
+
 This is an explicitly invoked, paper-research pipeline. It generates decisions,
 not orders, and does not import or call the paper broker. Its universe is fixed:
 AAPL, JNJ, JPM, MSFT, WMT and XOM. No scheduler or automatic trading is added.

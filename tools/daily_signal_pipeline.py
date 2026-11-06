@@ -11,7 +11,7 @@ from models.daily_signals import (
 )
 from providers.daily_ohlcv_provider import DailyOHLCVProvider
 from tools.historical_snapshot import (
-    EnvironmentRecord, HistoricalSnapshot, _read_json, canonical_json, capture_environment, input_hash,
+    EnvironmentRecord, FrozenModel, HistoricalSnapshot, _read_json, canonical_json, capture_environment, input_hash,
 )
 from tools.historical_signals import generate_mean_reversion_exits
 from tools.market_regimes import MarketRegime, classify_market_regime, filter_entries_by_regime
@@ -93,6 +93,7 @@ class DailySignalStore:
 
     def __init__(self, path: str | Path):
         self._db = sqlite3.connect(str(path), isolation_level=None, timeout=10)
+        self._db.execute('PRAGMA foreign_keys=ON')
         app_id = 0x4C4C4453
         try:
             self._db.execute('BEGIN IMMEDIATE')
@@ -108,6 +109,10 @@ class DailySignalStore:
                 self._db.execute('PRAGMA user_version=1')
             elif app != app_id or version != 1:
                 raise ValueError('Not a supported daily-signal ledger')
+            # Additive metadata extension; existing 1B rows remain unverified.
+            self._db.execute('''CREATE TABLE IF NOT EXISTS run_verification (
+                run_id TEXT PRIMARY KEY REFERENCES runs(run_id),
+                verification_sha256 TEXT NOT NULL, verification_json TEXT NOT NULL)''')
             self._db.execute('COMMIT')
         except BaseException:
             if self._db.in_transaction:
@@ -124,25 +129,40 @@ class DailySignalStore:
     def __exit__(self, *args):
         self.close()
 
-    def publish(self, run_id: str, inputs: DailySignalInputs) -> DailySignalReport:
+    def publish(self, run_id: str, inputs: DailySignalInputs, *, verification: FrozenModel | None = None) -> DailySignalReport:
         if not isinstance(run_id, str) or not run_id.strip():
             raise ValueError('Nonempty stable run ID required')
         report = replay_daily_signals(inputs, expected_sha256=input_hash(inputs))
         values = (input_hash(inputs), input_hash(report), report.signal_date.isoformat(),
                   report.decision_at.isoformat(), canonical_json(inputs), canonical_json(report))
+        metadata = None if verification is None else (input_hash(verification), canonical_json(verification))
         self._db.execute('BEGIN IMMEDIATE')
         try:
             old = self._db.execute('SELECT inputs_sha256,report_sha256,signal_date,decision_at,inputs_json,report_json FROM runs WHERE run_id=?', (run_id,)).fetchone()
             if old is not None:
                 if old != values:
                     raise ValueError('Run ID conflicts with existing frozen inputs/results')
+                old_metadata = self._db.execute('SELECT verification_sha256,verification_json FROM run_verification WHERE run_id=?', (run_id,)).fetchone()
+                if old_metadata != metadata:
+                    raise ValueError('Run ID conflicts with existing verification metadata')
             else:
                 self._db.execute('INSERT INTO runs VALUES (?,?,?,?,?,?,?)', (run_id, *values))
+                if metadata is not None:
+                    self._db.execute('INSERT INTO run_verification VALUES (?,?,?)', (run_id, *metadata))
             self._db.execute('COMMIT')
         except BaseException:
             self._db.execute('ROLLBACK')
             raise
         return report
+
+    def load_verification(self, run_id: str) -> tuple[str, str]:
+        """Read integrity-checked metadata; authority must be checked externally."""
+        row = self._db.execute('SELECT verification_sha256,verification_json FROM run_verification WHERE run_id=?', (run_id,)).fetchone()
+        if row is None:
+            raise ValueError('Run has no strict verification metadata')
+        if sha256(row[1].encode('utf-8')).hexdigest() != row[0]:
+            raise ValueError('Stored verification integrity mismatch')
+        return row
 
     def load(self, run_id: str, *, expected_sha256: str) -> tuple[DailySignalInputs, DailySignalReport]:
         row = self._db.execute('SELECT inputs_sha256,report_sha256,inputs_json,report_json,signal_date,decision_at FROM runs WHERE run_id=?', (run_id,)).fetchone()
