@@ -151,8 +151,12 @@ class PaperBroker:
             try:
                 yield
                 self._db.execute("COMMIT")
-            except BaseException:
-                self._db.execute("ROLLBACK")
+            except BaseException as exc:
+                try:
+                    if self._db.in_transaction:
+                        self._db.execute("ROLLBACK")
+                except BaseException as cleanup:
+                    exc.add_note(f'Transaction inspection/rollback also failed: {type(cleanup).__name__}: {cleanup}')
                 raise
 
     def _create_schema(self):
@@ -410,6 +414,8 @@ class PaperBroker:
             from tools.operational_controls import read_control
             if read_control(self._db)['blocked']:
                 raise ValueError('Operational latch blocks strict execution')
+            if not getattr(self, '_integrity_checked', False):
+                raise ValueError('Strict fill requires transaction-scoped integrity preflight')
         blocked = None
         order = self._order(order_id)
         old = self._fill(order_id)

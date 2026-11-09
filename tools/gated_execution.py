@@ -109,7 +109,8 @@ def replay_execution_checks(record: ExecutionOutcome, *, expected_sha256: str) -
 def source_hash():
     digest = sha256()
     root = Path(__file__).resolve().parents[1]
-    for name in ('providers/paper_broker.py', 'tools/gated_execution.py', 'tools/operational_controls.py'):
+    for name in ('providers/paper_broker.py', 'tools/gated_execution.py', 'tools/operational_controls.py',
+                 'tools/operational_monitoring.py'):
         digest.update(name.encode() + b'\0' + (root / name).read_bytes() + b'\0')
     return digest.hexdigest()
 
@@ -166,6 +167,10 @@ def execute_locked(broker, request):
         return load_attempt_locked(broker, request.attempt_id)
     # A nonexistent target cannot have a foreign-key-bound durable attempt.
     order = broker._order(request.order_id)
+    from tools.operational_controls import strict_preflight_locked
+    # BEFORE the rejection savepoint and before capturing its equal-state audit:
+    # a critical latch must survive an ordinary rejected fill attempt.
+    strict_preflight_locked(broker, request)
     before = read_state_locked(broker)
     risk, converted, fill_json = None, None, None
     reasons = ()
@@ -222,11 +227,13 @@ def execute_locked(broker, request):
         eur = converted.proposal
         from providers.paper_broker import _timestamp
         broker._gate_active = True
+        broker._integrity_checked = True
         try:
             fill, blocked = broker._simulate_fill_locked(order.order_id, eur.entry_price, eur.commission,
                                                          eur.slippage, _timestamp(request.execution_at))
         finally:
             broker._gate_active = False
+            broker._integrity_checked = False
         _require(blocked is None, 'BROKER_REJECTED: ' + str(blocked))
         fill_json = _json(asdict(fill))
         for item in all_orders:
@@ -253,8 +260,19 @@ def execute_locked(broker, request):
     except Exception as exc:
         # If rollback itself fails, propagate: the broker outer transaction
         # rolls back. Never commit a rejection after an unconfirmed rollback.
-        db.execute('ROLLBACK TO gated_financial_attempt')
-        db.execute('RELEASE gated_financial_attempt')
+        try:
+            active = db.in_transaction
+        except Exception as inspection:
+            exc.add_note(f'Transaction status unavailable: {type(inspection).__name__}: {inspection}')
+            raise exc
+        if not active:
+            raise  # SQLite already aborted the whole transaction: no durable audit claimed.
+        try:
+            db.execute('ROLLBACK TO gated_financial_attempt')
+            db.execute('RELEASE gated_financial_attempt')
+        except Exception as cleanup:
+            exc.add_note(f'Savepoint rollback also failed: {type(cleanup).__name__}: {cleanup}')
+            raise exc
         after = read_state_locked(broker)
         if after != before:
             raise RuntimeError('Financial rollback could not be verified') from exc

@@ -1,5 +1,11 @@
 # Sprint 1I: operational monitoring and explicit recovery
 
+Sprint 1J follow-up: [Option B hardening](operational_safety_hardening.md) adds a
+coordinated reconcile-and-latch command and mandatory broker-scoped preflight on
+every new strict fill. Ordinary reports remain read-only. The separate two-phase
+report/activate API described below is no longer the only protection against
+broker CRITICAL findings during a new strict fill.
+
 Implements the approved [architecture assessment](operational_monitoring_design.md).
 Mode: offline synthetic research, manually operated. No financial repair,
 execution authorization, unattended execution, scheduler or notifications.
@@ -150,10 +156,11 @@ snapshot, activation rejects stale evidence and the operator must recapture.
 No smaller cash-only or 1G state hash substitutes for this comparison.
 
 If activation wins the lock, latch state plus activation evidence commit atomically
-and later new strict fills reject. If a fill wins first, it can commit during the
-documented window and the old activation request must fail stale. No architecture
-to eliminate that window, background detector or reconciliation-on-every-fill
-mechanism is introduced.
+and later new strict fills reject. The separate report/activate API can still see
+stale observations. Sprint 1J additionally makes every new strict fill inspect
+broker integrity under its own writer reservation and latch/refuse CRITICAL
+findings; see the hardening document for that stronger guarantee and the remaining
+cross-file/pre-lock boundaries. No background detector is introduced.
 
 Activation stores block/report/snapshot identities, actor, reason, timestamp,
 critical findings with observed/expected evidence references, content hashes and

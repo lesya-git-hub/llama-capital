@@ -9,9 +9,34 @@ import sqlite3
 from pydantic import AwareDatetime, Field
 
 from tools.fx_conversion import Digest, FXInput
-from tools.historical_snapshot import input_hash
-from tools.operational_monitoring import (BROKER_APP, MonitoringReport,
-    capture_connection, database_identity, replay_report, stable_json)
+from tools.historical_snapshot import FrozenModel, input_hash
+from tools.operational_monitoring import (BROKER_APP, MonitoringReport, MonitoringPolicy, OperationalSnapshot,
+    capture_connection, database_identity, reconcile_snapshot, replay_report, stable_json)
+
+
+# Conservative local research admission limits, NOT portfolio/risk thresholds.
+# Fixed code policy, not overrideable through an execution request. Exceeding a
+# limit refuses the fill; it does not claim that a safety latch was committed.
+PREFLIGHT_MAX_DATABASE_BYTES = 64 * 1024 * 1024
+PREFLIGHT_MAX_ROWS = 10_000
+PREFLIGHT_MAX_GATE_ATTEMPTS = 1_000
+
+
+class PreflightBudgetExceeded(RuntimeError):
+    """Integrity work cannot be admitted within the documented data budget."""
+
+
+def _check_preflight_budget(db):
+    size = db.execute('PRAGMA page_count').fetchone()[0] * db.execute('PRAGMA page_size').fetchone()[0]
+    if size > PREFLIGHT_MAX_DATABASE_BYTES:
+        raise PreflightBudgetExceeded('Strict preflight database-page budget exceeded; no fill permitted')
+    total = 0
+    for (name,) in db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").fetchall():
+        quoted = '"' + name.replace('"', '""') + '"'
+        count = db.execute(f'SELECT COUNT(*) FROM {quoted}').fetchone()[0]
+        total += count
+        if total > PREFLIGHT_MAX_ROWS or (name == 'gate_attempts' and count > PREFLIGHT_MAX_GATE_ATTEMPTS):
+            raise PreflightBudgetExceeded('Strict preflight row/history budget exceeded; no fill permitted')
 
 
 class RecoveryRequest(FXInput):
@@ -26,6 +51,8 @@ class RecoveryRequest(FXInput):
 
 def migrate_strict_controls(db):
     """Called only by broker initialization inside its write transaction."""
+    if not db.in_transaction:
+        raise ValueError('Migration requires the owning broker transaction')
     version = db.execute('PRAGMA user_version').fetchone()[0]
     if version == 2:
         existing = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
@@ -89,10 +116,22 @@ def _open(path):
             raise ValueError('Invalid strict mode')
         read_control(db)
         return db
-    except BaseException:
-        if db.in_transaction: db.execute('ROLLBACK')
-        db.close()
+    except BaseException as exc:
+        _rollback_preserving(db, exc)
+        try:
+            db.close()
+        except BaseException as cleanup:
+            exc.add_note(f'Connection close also failed: {type(cleanup).__name__}: {cleanup}')
         raise
+
+
+def _rollback_preserving(db, error):
+    """Cleanup may fail too: preserve the primary failure, never claim recovery."""
+    try:
+        if db.in_transaction:
+            db.execute('ROLLBACK')
+    except BaseException as cleanup:
+        error.add_note(f'Transaction inspection/rollback also failed: {type(cleanup).__name__}: {cleanup}')
 
 
 def _prior(db, event_id, request_sha256):
@@ -123,6 +162,98 @@ def _validate_current(db, path, report, expected_sha256):
     return report
 
 
+def _activation_request(report, activation_id, operator_id, reason, timestamp):
+    if not all(isinstance(v, str) and v.strip() for v in (activation_id, operator_id, reason)):
+        raise ValueError('Explicit action identity, operator and reason required')
+    if not isinstance(timestamp, datetime) or timestamp.tzinfo is None or timestamp.utcoffset() is None:
+        raise ValueError('Explicit aware action timestamp required')
+    return {'action': 'ACTIVATED', 'event_id': activation_id, 'operator_id': operator_id, 'reason': reason,
+        'timestamp': timestamp.astimezone(timezone.utc).isoformat(), 'report_sha256': input_hash(report)}
+
+
+def _activate_locked(db, report, request, *, origin):
+    """No BEGIN/COMMIT: caller owns the same write reservation as capture/check."""
+    if not db.in_transaction or report.status != 'CRITICAL':
+        raise ValueError('Activation requires a critical report inside the owning write transaction')
+    if read_control(db)['blocked']:
+        raise ValueError('Already operationally blocked; original evidence is preserved')
+    event = request | {'block_id': request['event_id'], 'snapshot_sha256': report.snapshot_sha256,
+        'broker_snapshot_sha256': input_hash(report.snapshot.broker), 'origin': origin,
+        'findings': [f.model_dump(mode='json') for f in report.findings],
+        'control_source_sha256': sha256(Path(__file__).read_bytes()).hexdigest()}
+    db.execute('UPDATE operational_control SET blocked=1,block_id=?,report_sha256=?,activated_at=? WHERE id=1',
+               (request['event_id'], request['report_sha256'], request['timestamp']))
+    _append(db, event, sha256(stable_json(request).encode()).hexdigest())
+    return event
+
+
+class SafetyCheck(FrozenModel):
+    report: MonitoringReport
+    block_id: str | None
+    activation_json: str | None
+
+
+def inspect_and_latch_locked(db, path, *, report_id, timestamp, activation_id, operator_id, reason,
+                             policy=MonitoringPolicy(), origin='coordinated_manual'):
+    """Capture -> pure reconciliation -> optional latch, under ONE existing lock.
+
+    A returned value is not a commit acknowledgement. Only the owning wrapper
+    may commit, and any exception must propagate without granting fill permission.
+    """
+    if not db.in_transaction:
+        raise ValueError('Coordinated inspection requires a write transaction')
+    control = read_control(db)
+    snapshot = OperationalSnapshot(broker=capture_connection(db, database_identity(path)))
+    report = reconcile_snapshot(snapshot, report_id=report_id, reported_at=timestamp, policy=policy)
+    event = None
+    if report.status == 'CRITICAL' and not control['blocked']:
+        request = _activation_request(report, activation_id, operator_id, reason, timestamp)
+        event = _activate_locked(db, report, request, origin=origin)
+        control = read_control(db)
+    return SafetyCheck(report=report, block_id=control['block_id'], activation_json=stable_json(event) if event else None)
+
+
+def reconcile_and_latch(path, *, report_id, timestamp, activation_id, operator_id, reason,
+                        policy=MonitoringPolicy()):
+    """Explicit manual operational command; never an order or financial repair."""
+    # Validate action metadata even when the eventual report is healthy.
+    if not all(isinstance(v, str) and v.strip() for v in (activation_id, operator_id, reason)):
+        raise ValueError('Explicit action identity, operator and reason required')
+    db = _open(path)
+    try:
+        result = inspect_and_latch_locked(db, path, report_id=report_id, timestamp=timestamp,
+            activation_id=activation_id, operator_id=operator_id, reason=reason, policy=policy)
+        db.execute('COMMIT')
+        return result
+    except BaseException as exc:
+        _rollback_preserving(db, exc)
+        raise
+    finally:
+        db.close()
+
+
+def strict_preflight_locked(broker, request):
+    """Every new strict attempt runs here; never caches healthy approval."""
+    db = broker._db
+    if not db.in_transaction or not broker.strict:
+        raise ValueError('Strict preflight requires the owning write transaction')
+    _check_preflight_budget(db)
+    if read_control(db)['blocked']:
+        return  # Existing latch guard will record rejection; never replace it.
+    filename = next(r[2] for r in db.execute('PRAGMA database_list') if r[1] == 'main')
+    if not filename:
+        raise ValueError('Integrity preflight requires a file-backed strict ledger')
+    # Preserve configurable existing opening capital. This is a declared ledger
+    # anchor, not independent authentication of the original deposit.
+    opening = db.execute('SELECT initial_cash FROM account WHERE id=1').fetchone()
+    policy = MonitoringPolicy(expected_opening_cash=opening[0]) if opening else MonitoringPolicy()
+    action_id = 'preflight:' + input_hash(request)
+    inspect_and_latch_locked(db, filename, report_id=action_id, timestamp=request.execution_at,
+        activation_id=action_id, operator_id='system:strict-preflight',
+        reason='Critical broker integrity finding during explicitly requested strict execution',
+        policy=policy, origin='strict_preflight')
+
+
 def activate_operational_block(path, report, *, expected_sha256, activation_id, operator_id, reason, timestamp):
     if not all(isinstance(v, str) and v.strip() for v in (activation_id, operator_id, reason)):
         raise ValueError('Explicit action identity, operator and reason required')
@@ -138,21 +269,29 @@ def activate_operational_block(path, report, *, expected_sha256, activation_id, 
         if prior is not None:
             db.execute('COMMIT')
             return prior
+        # A concurrent strict preflight may already have latched this EXACT
+        # broker observation. Acknowledge its real receipt without inventing a
+        # second activation, actor or action ID, and without clearing/changing it.
+        control = read_control(db)
+        if control['blocked']:
+            observed = replay_report(report, expected_sha256=expected_sha256)
+            active = db.execute('SELECT content_json,sha256 FROM operational_events WHERE event_id=?', (control['block_id'],)).fetchone()
+            if active and sha256(active[0].encode()).hexdigest() == active[1]:
+                event = json.loads(active[0])
+                if (event.get('origin') == 'strict_preflight' and observed.status == 'CRITICAL'
+                        and observed.snapshot.broker.identity == database_identity(path)
+                        and event.get('broker_snapshot_sha256') == input_hash(observed.snapshot.broker)
+                        and timestamp >= observed.reported_at):
+                    db.execute('COMMIT')
+                    return event
         report = _validate_current(db, path, report, expected_sha256)
         if report.status != 'CRITICAL' or timestamp < report.reported_at:
             raise ValueError('A current critical report and causal action timestamp are required')
-        if read_control(db)['blocked']:
-            raise ValueError('Already operationally blocked; original evidence is preserved')
-        event = request | {'block_id': activation_id, 'snapshot_sha256': report.snapshot_sha256,
-            'findings': [f.model_dump(mode='json') for f in report.findings],
-            'control_source_sha256': sha256(Path(__file__).read_bytes()).hexdigest()}
-        db.execute('UPDATE operational_control SET blocked=1,block_id=?,report_sha256=?,activated_at=? WHERE id=1',
-                   (activation_id, expected_sha256, request['timestamp']))
-        _append(db, event, digest)
+        event = _activate_locked(db, report, request, origin='manual_report')
         db.execute('COMMIT')
         return event
-    except BaseException:
-        if db.in_transaction: db.execute('ROLLBACK')
+    except BaseException as exc:
+        _rollback_preserving(db, exc)
         raise
     finally:
         db.close()
@@ -203,8 +342,8 @@ def release_operational_block(path, request, report, *, authorize=None):
         db.execute('COMMIT')
         if denied: raise PermissionError(denied)
         return event
-    except BaseException:
-        if db.in_transaction: db.execute('ROLLBACK')
+    except BaseException as exc:
+        _rollback_preserving(db, exc)
         raise
     finally:
         db.close()
