@@ -100,7 +100,9 @@ class PaperBroker:
     cancellation, rejection, reads and exact idempotent retries remain possible.
     """
 
-    def __init__(self, path: str | Path, *, initial_cash=None):
+    def __init__(self, path: str | Path, *, initial_cash=None, strict: bool | None = None):
+        if strict is not None and type(strict) is not bool:
+            raise ValueError('Strict mode must be explicitly boolean or omitted')
         initial = None if initial_cash is None else _money(initial_cash, positive=True)
         self._db = sqlite3.connect(str(path), isolation_level=None, timeout=10)
         self._db.row_factory = sqlite3.Row
@@ -115,8 +117,21 @@ class PaperBroker:
                     capital = initial if initial is not None else Decimal("10000")
                     self._db.execute("INSERT INTO account VALUES (1, 'EUR', ?, ?, '0', 0)",
                                      (str(capital), str(capital)))
-                elif app != APPLICATION_ID or version != 1:
+                    if strict is True:
+                        self._create_strict_schema()
+                elif app != APPLICATION_ID or version not in (1, 2):
                     raise ValueError("Not a supported paper-broker ledger")
+                elif version == 1 and any(t[0].startswith(('gate_', 'execution_mode')) for t in tables):
+                    raise ValueError('Inconsistent strict schema: refusing a silent downgrade')
+                elif strict is True and version == 1:
+                    raise ValueError('Strict mode must be selected when creating a new ledger')
+                self._strict = self._db.execute('PRAGMA user_version').fetchone()[0] == 2
+                if self._strict:
+                    mode = self._db.execute('SELECT mode FROM execution_mode WHERE id=1').fetchone()
+                    if mode is None or mode[0] != 'strict_synthetic':
+                        raise ValueError('Invalid persisted strict mode')
+                    if strict is False:
+                        raise ValueError('Strict ledgers cannot be downgraded')
                 account = self._db.execute("SELECT * FROM account WHERE id=1").fetchone()
                 if account is None or account['currency'] != 'EUR':
                     raise ValueError("Invalid paper-broker account")
@@ -164,6 +179,41 @@ class PaperBroker:
 
     def close(self):
         self._db.close()
+
+    def _create_strict_schema(self):
+        self._db.execute("CREATE TABLE execution_mode (id INTEGER PRIMARY KEY CHECK(id=1), mode TEXT NOT NULL CHECK(mode='strict_synthetic'))")
+        self._db.execute("INSERT INTO execution_mode VALUES (1,'strict_synthetic')")
+        self._db.execute('CREATE TABLE gate_attempts (attempt_id TEXT PRIMARY KEY, order_id TEXT NOT NULL REFERENCES orders(order_id), request_sha256 TEXT NOT NULL, outcome TEXT NOT NULL, record_sha256 TEXT NOT NULL, record_json TEXT NOT NULL)')
+        self._db.execute("CREATE UNIQUE INDEX gate_success ON gate_attempts(order_id) WHERE outcome='FILLED'")
+        self._db.execute('CREATE TABLE gate_holdings (ticker TEXT PRIMARY KEY, terms_json TEXT NOT NULL)')
+        self._db.execute('CREATE TABLE gate_order_terms (order_id TEXT PRIMARY KEY REFERENCES orders(order_id), terms_json TEXT NOT NULL)')
+        self._db.execute('PRAGMA user_version=2')
+
+    @property
+    def strict(self):
+        return self._strict
+
+    def execution_state(self):
+        """Frozen state identity for an explicit gated request; not authorization."""
+        from tools.gated_execution import read_state_locked
+        with self._transaction():
+            return read_state_locked(self)
+
+    def execute_gated(self, request):
+        """Manually invoked synthetic execution; final risk and fill share one lock."""
+        from tools.gated_execution import ExecutionRequest, execute_locked
+        request = ExecutionRequest.model_validate(request.model_dump(mode='json'))
+        with self._transaction():
+            if not self._strict:
+                raise ValueError('Gated execution requires an explicitly created strict ledger')
+            return execute_locked(self, request)
+
+    def execution_attempt(self, attempt_id):
+        from tools.gated_execution import load_attempt_locked
+        with self._transaction():
+            if not self._strict:
+                raise ValueError('Not a strict ledger')
+            return load_attempt_locked(self, attempt_id)
 
     def __enter__(self):
         return self
@@ -340,62 +390,74 @@ class PaperBroker:
         fee = _money(commission)
         slippage = _money(slippage_per_share)
         stamp = _timestamp(timestamp)
-        blocked = None
         with self._transaction():
-            order = self._order(order_id)
-            old = self._fill(order_id)
-            if old is not None:
-                if (reference, fee, slippage, stamp) != (
-                    old.reference_price, old.commission, old.slippage_per_share, old.timestamp,
-                ):
-                    raise ValueError("Conflicting fill retry")
-                return old
-            if order.status != 'ACCEPTED':
-                raise ValueError("Only ACCEPTED orders can be filled")
-            self._ensure_time(order, stamp)
-            last = self._db.execute("SELECT MAX(timestamp) FROM fills").fetchone()[0]
-            if last is not None and stamp < last:
-                raise ValueError("Execution cannot precede an existing portfolio fill")
-            a = self._db.execute("SELECT * FROM account WHERE id=1").fetchone()
-            p = self._db.execute("SELECT * FROM positions WHERE ticker=?", (order.ticker,)).fetchone()
-            held = p['quantity'] if p else 0
-            basis = Decimal(p['cost_basis']) if p else Decimal(0)
-            cash, realized = Decimal(a['cash']), Decimal(a['realized_pnl'])
-            execution = reference + slippage if order.side == 'BUY' else reference - slippage
-            delta = -(execution * order.quantity + fee) if order.side == 'BUY' else execution * order.quantity - fee
-            if a['killed']:
-                blocked = 'Kill switch enabled'
-            elif execution <= 0:
-                blocked = 'Nonpositive slipped execution price'
-            elif order.side == 'SELL' and held < order.quantity:
-                blocked = 'Insufficient holdings'
-            elif cash + delta < 0:
-                blocked = 'Insufficient cash including execution costs'
-            if blocked:
-                self._event(order_id, 'FILL_BLOCKED', stamp, blocked)
+            if self._strict:
+                raise ValueError('Strict ledger: direct manual fills are prohibited')
+            fill, blocked = self._simulate_fill_locked(order_id, reference, fee, slippage, stamp)
+        if blocked:
+            raise ValueError(blocked)
+        return fill
+
+    def _simulate_fill_locked(self, order_id, reference, fee, slippage, stamp):
+        """Shared accounting; only called while the owning write transaction is active."""
+        if not self._db.in_transaction:
+            raise ValueError('An active broker transaction is required')
+        if self._strict and not getattr(self, '_gate_active', False):
+            raise ValueError('Strict ledger requires in-transaction risk authorization')
+        blocked = None
+        order = self._order(order_id)
+        old = self._fill(order_id)
+        if old is not None:
+            if (reference, fee, slippage, stamp) != (
+                old.reference_price, old.commission, old.slippage_per_share, old.timestamp,
+            ):
+                raise ValueError("Conflicting fill retry")
+            return old, None
+        if order.status != 'ACCEPTED':
+            raise ValueError("Only ACCEPTED orders can be filled")
+        self._ensure_time(order, stamp)
+        last = self._db.execute("SELECT MAX(timestamp) FROM fills").fetchone()[0]
+        if last is not None and stamp < last:
+            raise ValueError("Execution cannot precede an existing portfolio fill")
+        a = self._db.execute("SELECT * FROM account WHERE id=1").fetchone()
+        p = self._db.execute("SELECT * FROM positions WHERE ticker=?", (order.ticker,)).fetchone()
+        held = p['quantity'] if p else 0
+        basis = Decimal(p['cost_basis']) if p else Decimal(0)
+        cash, realized = Decimal(a['cash']), Decimal(a['realized_pnl'])
+        execution = reference + slippage if order.side == 'BUY' else reference - slippage
+        delta = -(execution * order.quantity + fee) if order.side == 'BUY' else execution * order.quantity - fee
+        if a['killed']:
+            blocked = 'Kill switch enabled'
+        elif execution <= 0:
+            blocked = 'Nonpositive slipped execution price'
+        elif order.side == 'SELL' and held < order.quantity:
+            blocked = 'Insufficient holdings'
+        elif cash + delta < 0:
+            blocked = 'Insufficient cash including execution costs'
+        if blocked:
+            self._event(order_id, 'FILL_BLOCKED', stamp, blocked)
+        else:
+            if order.side == 'BUY':
+                allocated, pnl = Decimal(0), Decimal(0)
+                new_quantity, new_basis = held + order.quantity, basis - delta
             else:
-                if order.side == 'BUY':
-                    allocated, pnl = Decimal(0), Decimal(0)
-                    new_quantity, new_basis = held + order.quantity, basis - delta
-                else:
-                    allocated = basis if order.quantity == held else (
-                        basis * order.quantity / held
-                    ).quantize(QUANTUM, rounding=ROUND_HALF_EVEN)
-                    pnl = delta - allocated
-                    new_quantity, new_basis = held - order.quantity, basis - allocated
-                self._db.execute("UPDATE account SET cash=?,realized_pnl=? WHERE id=1",
-                                 (str(cash + delta), str(realized + pnl)))
-                if new_quantity:
-                    self._db.execute("""INSERT INTO positions VALUES (?,?,?) ON CONFLICT(ticker)
-                                     DO UPDATE SET quantity=excluded.quantity,cost_basis=excluded.cost_basis""",
-                                     (order.ticker, new_quantity, str(new_basis)))
-                else:
-                    self._db.execute("DELETE FROM positions WHERE ticker=?", (order.ticker,))
-                self._db.execute("INSERT INTO fills VALUES (?,?,?,?,?,?,?,?,?)", (
-                    order_id, str(reference), str(execution), str(fee), str(slippage), stamp,
-                    str(delta), str(allocated), str(pnl),
-                ))
-                self._transition(order_id, 'FILLED', stamp, 'Explicit simulated execution')
-                return self._fill(order_id)
-        # The failed execution audit is durable; no economic state changed.
-        raise ValueError(blocked)
+                allocated = basis if order.quantity == held else (
+                    basis * order.quantity / held
+                ).quantize(QUANTUM, rounding=ROUND_HALF_EVEN)
+                pnl = delta - allocated
+                new_quantity, new_basis = held - order.quantity, basis - allocated
+            self._db.execute("UPDATE account SET cash=?,realized_pnl=? WHERE id=1",
+                             (str(cash + delta), str(realized + pnl)))
+            if new_quantity:
+                self._db.execute("""INSERT INTO positions VALUES (?,?,?) ON CONFLICT(ticker)
+                                 DO UPDATE SET quantity=excluded.quantity,cost_basis=excluded.cost_basis""",
+                                 (order.ticker, new_quantity, str(new_basis)))
+            else:
+                self._db.execute("DELETE FROM positions WHERE ticker=?", (order.ticker,))
+            self._db.execute("INSERT INTO fills VALUES (?,?,?,?,?,?,?,?,?)", (
+                order_id, str(reference), str(execution), str(fee), str(slippage), stamp,
+                str(delta), str(allocated), str(pnl),
+            ))
+            self._transition(order_id, 'FILLED', stamp, 'Explicit simulated execution')
+            return self._fill(order_id), None
+        return None, blocked
