@@ -119,13 +119,13 @@ class PaperBroker:
                                      (str(capital), str(capital)))
                     if strict is True:
                         self._create_strict_schema()
-                elif app != APPLICATION_ID or version not in (1, 2, 3):
+                elif app != APPLICATION_ID or version not in (1, 2, 3, 4):
                     raise ValueError("Not a supported paper-broker ledger")
-                elif version == 1 and any(t[0].startswith(('gate_', 'execution_mode', 'operational_')) for t in tables):
+                elif version == 1 and any(t[0].startswith(('gate_', 'execution_mode', 'operational_', 'restore_')) for t in tables):
                     raise ValueError('Inconsistent strict schema: refusing a silent downgrade')
                 elif strict is True and version == 1:
                     raise ValueError('Strict mode must be selected when creating a new ledger')
-                self._strict = self._db.execute('PRAGMA user_version').fetchone()[0] in (2, 3)
+                self._strict = self._db.execute('PRAGMA user_version').fetchone()[0] in (2, 3, 4)
                 if self._strict:
                     mode = self._db.execute('SELECT mode FROM execution_mode WHERE id=1').fetchone()
                     if mode is None or mode[0] != 'strict_synthetic':
@@ -411,6 +411,9 @@ class PaperBroker:
         if self._strict and not getattr(self, '_gate_active', False):
             raise ValueError('Strict ledger requires in-transaction risk authorization')
         if self._strict:
+            from tools.restore_quarantine import read_restore_fence
+            if read_restore_fence(self._db) is not None:
+                raise ValueError('RESTORE_QUARANTINE: strict execution is fenced')
             from tools.operational_controls import read_control
             if read_control(self._db)['blocked']:
                 raise ValueError('Operational latch blocks strict execution')

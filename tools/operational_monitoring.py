@@ -171,14 +171,23 @@ def reconcile_snapshot(snapshot, *, report_id, reported_at, policy=MonitoringPol
         add('DATABASE_INTEGRITY', 'Database cannot be fully and consistently inspected', snapshot.broker.identity, raw.get('capture_error', raw.get('integrity')))
     if raw.get('foreign_keys'):
         add('FOREIGN_KEY_CONFLICT', 'Broken ledger foreign-key references', raw['foreign_keys'])
-    if raw.get('application_id') != BROKER_APP or raw.get('user_version') not in (1, 2, 3):
+    if raw.get('application_id') != BROKER_APP or raw.get('user_version') not in (1, 2, 3, 4):
         add('UNSUPPORTED_LEDGER', 'Invalid broker application/schema identity', snapshot.broker.identity)
+    from tools.restore_quarantine import validate_fence
+    try:
+        if raw.get('user_version') == 4:
+            validate_fence(tables.get('restore_fence', []))
+        elif 'restore_fence' in tables:
+            raise ValueError('Restore schema downgrade')
+    except (ValueError, KeyError, TypeError) as exc:
+        add('RESTORE_FENCE_INVALID', 'Restore quarantine evidence is missing or inconsistent', str(exc))
     if not required <= tables.keys():
         add('MISSING_LEDGER_TABLE', 'Required financial evidence is missing', sorted(required - tables.keys()))
     else:
         primary_keys = {'account': 'id', 'orders': 'order_id', 'positions': 'ticker', 'fills': 'order_id',
             'audit': 'sequence', 'execution_mode': 'id', 'gate_attempts': 'attempt_id', 'gate_holdings': 'ticker',
-            'gate_order_terms': 'order_id', 'operational_control': 'id', 'operational_events': 'sequence'}
+            'gate_order_terms': 'order_id', 'operational_control': 'id', 'operational_events': 'sequence',
+            'restore_fence': 'id'}
         for table, primary in primary_keys.items():
             if table in tables and [c[1] for c in raw.get('columns', {}).get(table, []) if c[5]] != [primary]:
                 add('SCHEMA_CONSTRAINT_MISSING', 'Required primary-key constraint is absent or changed', table, primary)
@@ -191,6 +200,7 @@ def reconcile_snapshot(snapshot, *, report_id, reported_at, policy=MonitoringPol
             'gate_attempts': {'attempt_id', 'order_id', 'request_sha256', 'outcome', 'record_sha256', 'record_json'},
             'operational_control': {'id', 'blocked', 'block_id', 'report_sha256', 'activated_at'},
             'operational_events': {'sequence', 'event_id', 'request_sha256', 'content_json', 'sha256'},
+            'restore_fence': {'id', 'quarantined', 'receipt_json', 'receipt_sha256'},
         }
         for table, columns in required_columns.items():
             if table in tables and not columns <= {c[1] for c in raw.get('columns', {}).get(table, [])}:
@@ -198,13 +208,13 @@ def reconcile_snapshot(snapshot, *, report_id, reported_at, policy=MonitoringPol
         if 'gate_attempts' in tables and not any(i['unique'] and i['partial'] and i['columns'] == ['order_id']
                                                for i in raw.get('indexes', {}).get('gate_attempts', [])):
             add('SCHEMA_CONSTRAINT_MISSING', 'Strict successful-fill uniqueness index is absent', 'gate_success')
-        strict = raw.get('user_version') in (2, 3)
+        strict = raw.get('user_version') in (2, 3, 4)
         strict_tables = {'execution_mode', 'gate_attempts', 'gate_holdings', 'gate_order_terms'}
         if strict and not strict_tables <= tables.keys():
             add('MISSING_STRICT_AUTHORITY', 'Required strict gate evidence tables are absent', sorted(strict_tables - tables.keys()))
         if strict and tables.get('execution_mode') != [{'id': 1, 'mode': 'strict_synthetic'}]:
             add('STRICT_MODE_CONFLICT', 'Persisted strict-mode identity is missing or inconsistent', 'execution_mode')
-        if not strict and any(t.startswith(('gate_', 'execution_mode', 'operational_')) for t in tables):
+        if not strict and any(t.startswith(('gate_', 'execution_mode', 'operational_', 'restore_')) for t in tables):
             add('STRICT_DOWNGRADE', 'Legacy version conflicts with persisted strict/control evidence', 'schema')
         try:
             with localcontext(CONTEXT):
@@ -579,6 +589,8 @@ def human_report(report):
         f'Virtual EUR cash={report.cash_eur}; holdings at cost={report.holdings_json}',
         f'Orders={report.order_counts_json}; gate outcomes={report.gate_counts_json}; workflows={report.workflow_runs_json}',
         'Operational integrity only; no market valuation, execution authorization or investment-performance claim.']
+    if json.loads(report.snapshot.broker.content).get('user_version') == 4:
+        lines.append('RESTORE QUARANTINE: inspection-only ledger; no execution release exists in Sprint 1K.')
     if report.operational_block:
         control = json.loads(report.snapshot.broker.content).get('tables', {}).get('operational_control', [{}])[0]
         lines.append(f'Operational block {control.get("block_id")} remains active; activation report={control.get("report_sha256")}. Investigate durable evidence and use explicit authorized recovery. A healthy report does not clear it.')

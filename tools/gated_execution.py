@@ -110,7 +110,7 @@ def source_hash():
     digest = sha256()
     root = Path(__file__).resolve().parents[1]
     for name in ('providers/paper_broker.py', 'tools/gated_execution.py', 'tools/operational_controls.py',
-                 'tools/operational_monitoring.py'):
+                 'tools/operational_monitoring.py', 'tools/restore_quarantine.py'):
         digest.update(name.encode() + b'\0' + (root / name).read_bytes() + b'\0')
     return digest.hexdigest()
 
@@ -128,6 +128,10 @@ def read_state_locked(broker):
         for table, ordering in (('gate_holdings', 'ticker'), ('gate_order_terms', 'order_id')):
             state[table] = [dict(r) for r in db.execute(f'SELECT * FROM {table} ORDER BY {ordering}')]
         from tools.operational_controls import read_control
+        from tools.restore_quarantine import read_restore_fence
+        fence = read_restore_fence(db)
+        if fence is not None:
+            state['restore_fence'] = fence
         state['operational_control'] = read_control(db)
         state['operational_sequence'] = db.execute('SELECT COALESCE(MAX(sequence),0) FROM operational_events').fetchone()[0]
     return LedgerState(content=_json(state))
@@ -177,6 +181,8 @@ def execute_locked(broker, request):
     db.execute('SAVEPOINT gated_financial_attempt')
     try:
         from tools.operational_controls import read_control
+        from tools.restore_quarantine import read_restore_fence
+        _require(read_restore_fence(db) is None, 'RESTORE_QUARANTINE: strict execution is fenced')
         _require(not read_control(db)['blocked'], 'OPERATIONAL_BLOCK: strict execution is latched off')
         _require(input_hash(before) == request.expected_state_sha256, 'STALE_STATE: ledger changed since the supplied state')
         _require(order.status == 'ACCEPTED', 'ORDER_STATUS: only an unfilled ACCEPTED order may execute')

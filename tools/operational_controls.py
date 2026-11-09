@@ -62,8 +62,10 @@ def migrate_strict_controls(db):
         db.execute('INSERT INTO operational_control VALUES (1,0,NULL,NULL,NULL)')
         db.execute('CREATE TABLE operational_events (sequence INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT UNIQUE NOT NULL, request_sha256 TEXT NOT NULL, content_json TEXT NOT NULL, sha256 TEXT NOT NULL)')
         db.execute('PRAGMA user_version=3')
-    elif version != 3:
+    elif version not in (3, 4):
         raise ValueError('Operational controls require a strict schema')
+    from tools.restore_quarantine import read_restore_fence
+    read_restore_fence(db)
     read_control(db)
 
 
@@ -110,10 +112,12 @@ def _open(path):
     db.row_factory = sqlite3.Row
     try:
         db.execute('BEGIN IMMEDIATE')
-        if db.execute('PRAGMA application_id').fetchone()[0] != BROKER_APP or db.execute('PRAGMA user_version').fetchone()[0] != 3:
+        if db.execute('PRAGMA application_id').fetchone()[0] != BROKER_APP or db.execute('PRAGMA user_version').fetchone()[0] not in (3, 4):
             raise ValueError('Operational control action requires an initialized strict version-3 ledger')
         if db.execute('SELECT mode FROM execution_mode WHERE id=1').fetchone()[0] != 'strict_synthetic':
             raise ValueError('Invalid strict mode')
+        from tools.restore_quarantine import read_restore_fence
+        read_restore_fence(db)
         read_control(db)
         return db
     except BaseException as exc:
@@ -237,6 +241,9 @@ def strict_preflight_locked(broker, request):
     db = broker._db
     if not db.in_transaction or not broker.strict:
         raise ValueError('Strict preflight requires the owning write transaction')
+    from tools.restore_quarantine import read_restore_fence
+    if read_restore_fence(db) is not None:
+        return  # Gate records rejection; quarantine never releases or repairs controls.
     _check_preflight_budget(db)
     if read_control(db)['blocked']:
         return  # Existing latch guard will record rejection; never replace it.
