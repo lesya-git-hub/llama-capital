@@ -109,7 +109,7 @@ def replay_execution_checks(record: ExecutionOutcome, *, expected_sha256: str) -
 def source_hash():
     digest = sha256()
     root = Path(__file__).resolve().parents[1]
-    for name in ('providers/paper_broker.py', 'tools/gated_execution.py'):
+    for name in ('providers/paper_broker.py', 'tools/gated_execution.py', 'tools/operational_controls.py'):
         digest.update(name.encode() + b'\0' + (root / name).read_bytes() + b'\0')
     return digest.hexdigest()
 
@@ -126,6 +126,9 @@ def read_state_locked(broker):
     if broker.strict:
         for table, ordering in (('gate_holdings', 'ticker'), ('gate_order_terms', 'order_id')):
             state[table] = [dict(r) for r in db.execute(f'SELECT * FROM {table} ORDER BY {ordering}')]
+        from tools.operational_controls import read_control
+        state['operational_control'] = read_control(db)
+        state['operational_sequence'] = db.execute('SELECT COALESCE(MAX(sequence),0) FROM operational_events').fetchone()[0]
     return LedgerState(content=_json(state))
 
 
@@ -168,6 +171,8 @@ def execute_locked(broker, request):
     reasons = ()
     db.execute('SAVEPOINT gated_financial_attempt')
     try:
+        from tools.operational_controls import read_control
+        _require(not read_control(db)['blocked'], 'OPERATIONAL_BLOCK: strict execution is latched off')
         _require(input_hash(before) == request.expected_state_sha256, 'STALE_STATE: ledger changed since the supplied state')
         _require(order.status == 'ACCEPTED', 'ORDER_STATUS: only an unfilled ACCEPTED order may execute')
         _require(request.execution_at > request.signal_available_at, 'LOOKAHEAD: execution must follow signal availability')

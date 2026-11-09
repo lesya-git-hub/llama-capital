@@ -119,19 +119,21 @@ class PaperBroker:
                                      (str(capital), str(capital)))
                     if strict is True:
                         self._create_strict_schema()
-                elif app != APPLICATION_ID or version not in (1, 2):
+                elif app != APPLICATION_ID or version not in (1, 2, 3):
                     raise ValueError("Not a supported paper-broker ledger")
-                elif version == 1 and any(t[0].startswith(('gate_', 'execution_mode')) for t in tables):
+                elif version == 1 and any(t[0].startswith(('gate_', 'execution_mode', 'operational_')) for t in tables):
                     raise ValueError('Inconsistent strict schema: refusing a silent downgrade')
                 elif strict is True and version == 1:
                     raise ValueError('Strict mode must be selected when creating a new ledger')
-                self._strict = self._db.execute('PRAGMA user_version').fetchone()[0] == 2
+                self._strict = self._db.execute('PRAGMA user_version').fetchone()[0] in (2, 3)
                 if self._strict:
                     mode = self._db.execute('SELECT mode FROM execution_mode WHERE id=1').fetchone()
                     if mode is None or mode[0] != 'strict_synthetic':
                         raise ValueError('Invalid persisted strict mode')
                     if strict is False:
                         raise ValueError('Strict ledgers cannot be downgraded')
+                    from tools.operational_controls import migrate_strict_controls
+                    migrate_strict_controls(self._db)
                 account = self._db.execute("SELECT * FROM account WHERE id=1").fetchone()
                 if account is None or account['currency'] != 'EUR':
                     raise ValueError("Invalid paper-broker account")
@@ -404,6 +406,10 @@ class PaperBroker:
             raise ValueError('An active broker transaction is required')
         if self._strict and not getattr(self, '_gate_active', False):
             raise ValueError('Strict ledger requires in-transaction risk authorization')
+        if self._strict:
+            from tools.operational_controls import read_control
+            if read_control(self._db)['blocked']:
+                raise ValueError('Operational latch blocks strict execution')
         blocked = None
         order = self._order(order_id)
         old = self._fill(order_id)
