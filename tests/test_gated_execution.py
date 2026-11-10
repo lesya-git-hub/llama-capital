@@ -114,7 +114,7 @@ def test_legacy_remains_unrestricted_and_not_silently_upgraded(tmp_path):
         assert not b.strict and b.reconcile().positions[0].quantity == 30
 
 
-def test_success_sell_and_unchanged_conservative_sell_policy(broker):
+def test_success_sell_and_risk_reducing_exception(broker):
     accepted(broker, quantity=20)
     assert broker.execute_gated(request(broker)).status == 'FILLED'
     accepted(broker, 'sell', side='SELL', quantity=5)
@@ -122,7 +122,10 @@ def test_success_sell_and_unchanged_conservative_sell_policy(broker):
     assert outcome.status == 'FILLED'
     assert broker.reconcile().positions[0].quantity == 15
     accepted(broker, 'sell2', side='SELL', quantity=1)
-    rejected(broker, request(broker, 'sell2', 'sale2', policy_changes={'max_position': '.1'}), 'POSITION_EXPOSURE')
+    outcome = broker.execute_gated(request(broker, 'sell2', 'sale2', policy_changes={'max_position': '.1'}))
+    assert outcome.status == 'FILLED'
+    assert outcome.risk.reasons[0].startswith('RISK_REDUCING_SELL_EXCEPTION:')
+    broker.reconcile()
 
 
 @pytest.mark.parametrize('changes,policy,reason', [

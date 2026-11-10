@@ -83,8 +83,8 @@ class Proposal(RiskModel):
 
     @model_validator(mode='after')
     def valid_prices(self):
-        if self.stop_price >= self.entry_price or self.exit_slippage >= self.stop_price:
-            raise ValueError('Positive long stop below reference price and adverse stop execution required')
+        if (self.side == 'BUY' and self.stop_price >= self.entry_price) or self.exit_slippage >= self.stop_price:
+            raise ValueError('BUY stop must be below reference price; positive adverse stop execution required')
         if self.side == 'SELL' and self.slippage >= self.entry_price:
             raise ValueError('SELL execution price must remain positive')
         return self
@@ -163,7 +163,7 @@ def evaluate_pretrade(snapshot: ValuationSnapshot, proposal: Proposal, configura
                       *, evaluated_at: datetime) -> RiskDecision:
     """Malformed structures raise ValueError; unsafe valid structures return REJECTED.
 
-    Limits apply to the entire conservative projected portfolio, including SELLs.
+    BUY limits remain strict. Qualifying reducing SELLs may retain existing breaches.
     No approval is remembered internally and no cash/shares are reserved.
     """
     snapshot = ValuationSnapshot.model_validate(snapshot.model_dump(mode='json'))
@@ -174,14 +174,34 @@ def evaluate_pretrade(snapshot: ValuationSnapshot, proposal: Proposal, configura
     evaluated_at = evaluated_at.astimezone(timezone.utc)
     with localcontext(Context(prec=50)):
         reasons, current, projected = _evaluate(snapshot, proposal, configuration, evaluated_at)
+        exception_used = (proposal.side == 'SELL' and not reasons and projected is not None
+            and bool(_exposure_risk_breaches(projected, configuration)))
     return RiskDecision(
         evaluated_at=evaluated_at, snapshot_id=snapshot.snapshot_id, proposal_id=proposal.proposal_id,
         configuration_version=configuration.version, snapshot_sha256=input_hash(snapshot),
         proposal_sha256=input_hash(proposal), configuration_sha256=input_hash(configuration),
         engine_sha256=sha256(Path(__file__).read_bytes()).hexdigest(),
-        decision='REJECTED' if reasons else 'APPROVED', reasons=tuple(reasons) or ('WITHIN_LIMITS',),
+        decision='REJECTED' if reasons else 'APPROVED', reasons=tuple(reasons) or (
+            ('RISK_REDUCING_SELL_EXCEPTION: pre-existing exposure/risk breaches retained',)
+            if exception_used else ('WITHIN_LIMITS',)),
         current=current, projected=projected,
     )
+
+
+def _exposure_risk_breaches(metrics, configuration):
+    """Only these limits may qualify for a reducing SELL exception."""
+    reasons = []
+    base = metrics.limit_equity
+    if metrics.invested > base * configuration.max_invested:
+        reasons.append('TOTAL_EXPOSURE: maximum invested exposure exceeded')
+    if metrics.planned_risk > base * configuration.max_aggregate_risk:
+        reasons.append('AGGREGATE_RISK: aggregate planned stop-loss risk exceeded')
+    for position in metrics.positions:
+        if position.value > base * configuration.max_position:
+            reasons.append(f'POSITION_EXPOSURE: {position.ticker} concentration exceeded')
+        if position.planned_risk > base * configuration.max_position_risk:
+            reasons.append(f'POSITION_RISK: {position.ticker} planned stop-loss risk exceeded')
+    return reasons
 
 
 def _evaluate(s, p, c, now):
@@ -201,11 +221,18 @@ def _evaluate(s, p, c, now):
     if any(m.as_of > s.as_of for m in s.marks):
         return reasons + ['VALUATION_CAUSALITY: mark is newer than portfolio snapshot'], None, None
     quantities = {h.ticker: h.quantity for h in s.holdings}
-    risks = {}
+    risks, held_risk_per_share = {}, {}
     for h in s.holdings:
-        if h.stop_price >= marks[h.ticker] or h.exit_slippage >= h.stop_price:
+        if (p.side == 'BUY' and h.stop_price >= marks[h.ticker]) or h.exit_slippage >= h.stop_price:
             return reasons + ['INVALID_STOP: held-position stop must be below current mark'], None, None
-        risks[h.ticker] = h.quantity * (marks[h.ticker] - h.stop_price + h.exit_slippage) + h.exit_commission
+        # SELL is an exit, not a new stop-protected entry. A breached stop cannot
+        # supply negative risk or protective credit: conservatively reserve the
+        # full marked value of any residual shares, plus existing exit costs.
+        # BUY eligibility and all portfolio limit checks remain unchanged.
+        distance = (marks[h.ticker] - h.stop_price if h.stop_price < marks[h.ticker]
+                    else marks[h.ticker]) + h.exit_slippage
+        held_risk_per_share[h.ticker] = distance
+        risks[h.ticker] = h.quantity * distance + h.exit_commission
     def metrics(cash, quantities, risks, denominator=None):
         invested = sum((marks[t] * q for t, q in quantities.items()), Decimal(0))
         equity = cash + invested
@@ -257,25 +284,30 @@ def _evaluate(s, p, c, now):
             held = quantities[ticker]
             cash += qty * (order.entry_price - order.slippage) - order.commission
             holding = next(h for h in s.holdings if h.ticker == ticker)
-            risks[ticker] = (held - qty) * (
-                marks[ticker] - holding.stop_price + holding.exit_slippage
-            ) + (holding.exit_commission if held > qty else Decimal(0))
+            risks[ticker] = (held - qty) * held_risk_per_share[ticker] + (
+                holding.exit_commission if held > qty else Decimal(0))
             quantities[ticker] -= qty
     projected = metrics(cash, quantities, risks, current.equity)
     base = min(current.equity, projected.equity)
     if base <= 0: reasons.append('NONPOSITIVE_EQUITY: positive equity required')
     if cash < 0: reasons.append('NEGATIVE_CASH: no margin or borrowing permitted')
-    if projected.invested > base * c.max_invested:
-        reasons.append('TOTAL_EXPOSURE: maximum invested exposure exceeded')
+    limits = _exposure_risk_breaches(projected, c)
+    # Only existing exposure/stop-risk breaches can be retained. Pending BUYs
+    # cannot ride an exit exception into new capacity. Cash reserve and every
+    # structural/integrity rejection remain mandatory, as do all BUY checks.
+    owned = next((h.quantity for h in s.holdings if h.ticker == p.ticker), 0)
+    reducing_sell = (p.side == 'SELL' and 0 <= quantities.get(p.ticker, 0) < owned
+        and projected.invested < current.invested
+        and projected.planned_risk <= current.planned_risk
+        and not any(o.side == 'BUY' for o in pending))
+    if reducing_sell:
+        existing = set(_exposure_risk_breaches(current, c))
+        limits = [reason for reason in limits if reason not in existing]
+    # Keep the previous reason ordering for BUY audits/replay.
+    reasons.extend(reason for reason in limits if reason.startswith('TOTAL_EXPOSURE:'))
     if cash < base * c.min_cash:
         reasons.append('CASH_RESERVE: minimum cash reserve breached')
-    if projected.planned_risk > base * c.max_aggregate_risk:
-        reasons.append('AGGREGATE_RISK: aggregate planned stop-loss risk exceeded')
-    for position in projected.positions:
-        if position.value > base * c.max_position:
-            reasons.append(f'POSITION_EXPOSURE: {position.ticker} concentration exceeded')
-        if position.planned_risk > base * c.max_position_risk:
-            reasons.append(f'POSITION_RISK: {position.ticker} planned stop-loss risk exceeded')
+    reasons.extend(reason for reason in limits if not reason.startswith('TOTAL_EXPOSURE:'))
     return list(dict.fromkeys(reasons)), current, projected
 
 
